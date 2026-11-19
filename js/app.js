@@ -667,7 +667,7 @@ function renderDrawbar() {
       if (t.k === 'trash') { drawings.clearAll(); return; }
       if (t.k === 'magnet') { drawings.magnet = !drawings.magnet; S.settings.magnet = drawings.magnet; save(); }
       else if (t.k === 'lock') drawings.lock = !drawings.lock;
-      else if (t.k === 'hide') drawings.hidden = !drawings.hidden;
+      else if (t.k === 'hide') { drawings.hidden = !drawings.hidden; if (drawings.hidden) drawings.select(null); }
       else drawings.setTool(drawings.tool === t.k ? 'cursor' : t.k);
       renderDrawbar();
     };
@@ -680,6 +680,7 @@ function renderSwatches(d) {
   const sw = $('#swatches');
   sw.innerHTML = '';
   if (d.type === 'measure') { $('#selBar').hidden = true; return; }
+  $('#editText').hidden = d.type !== 'text';
   for (const c of COLORS) {
     const b = el('button', 'swatch' + (d.color === c ? ' on' : ''));
     b.style.background = c; b.title = c;
@@ -688,6 +689,11 @@ function renderSwatches(d) {
   }
 }
 $('#delDrawing').onclick = () => drawings.deleteSelected();
+$('#editText').onclick = () => {
+  const d = drawings.selected;
+  if (!d || d.type !== 'text') return;
+  askText(d.text).then(t => { if (t) drawings.setText(t); });
+};
 
 let textResolve = null;
 function askText(def) {
@@ -709,11 +715,17 @@ $('#shotBtn').onclick = () => {
   const dpr = window.devicePixelRatio || 1;
   ctx.font = `${12 * dpr}px sans-serif`; ctx.fillStyle = css('--muted');
   ctx.fillText(`${symLabel(S.symbol)} · ${INTERVALS.find(i => i.k === S.interval).label} · 鷹眼看盤 · ${new Date().toLocaleString('zh-TW')}`, 10 * dpr, c.height - 10 * dpr);
-  c.toBlob(b => {
-    const a = el('a'); a.href = URL.createObjectURL(b); a.download = `${S.symbol}_${S.interval}_${Date.now()}.png`; a.click();
+  c.toBlob(async b => {
+    const name = `${S.symbol}_${S.interval}_${Date.now()}.png`;
+    // phones (esp. installed iOS apps) can't download files: use the share sheet so it can be saved to Photos
+    const file = new File([b], name, { type: 'image/png' });
+    if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: symLabel(S.symbol) }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const a = el('a'); a.href = URL.createObjectURL(b); a.download = name; a.click();
+    toast('已儲存截圖');
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
-  toast('已儲存截圖');
 };
 $('#sideBtn').onclick = () => {
   if (matchMedia('(max-width: 900px)').matches) document.body.classList.toggle('app-side-open');

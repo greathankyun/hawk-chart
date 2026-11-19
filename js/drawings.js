@@ -65,6 +65,7 @@ export class Drawings {
     this.items = this.items.filter(d => d !== this.selected);
     this.select(null); this.save();
   }
+  setText(t) { if (this.selected && this.selected.type === 'text' && t) { this.snapshot(); this.selected.text = t; this.save(); } }
   setColor(c) { if (this.selected) { this.snapshot(); this.selected.color = c; this.save(); } }
   select(d) { this.selected = d; this.onSelect(d); }
 
@@ -172,9 +173,15 @@ export class Drawings {
     let drag = null;
     ct.addEventListener('pointerdown', e => {
       if (this.tool !== 'cursor' || this.hidden || e.button > 0) return;
+      // only react to presses on the chart itself, not on toolbars/buttons layered above it
+      if (!e.target.closest || !e.target.closest('#chart')) return;
       const { x, y } = pos(e);
       const hit = this.hitTest(x, y, e.pointerType === 'touch' ? 14 : 7);
-      if (!hit) { if (this.selected) this.select(null); return; }
+      if (!hit) {
+        if (this.selected) this.select(null);
+        if (this.items.some(d => d.type === 'measure')) this.items = this.items.filter(d => d.type !== 'measure');
+        return;
+      }
       this.select(hit.d);
       this.chart.applyOptions({ handleScroll: false, handleScale: false });
       const lg = this.chart.timeScale().coordinateToLogical(x) ?? 0;

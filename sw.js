@@ -1,5 +1,5 @@
 // App-shell cache: the UI works offline; market data always goes to the network.
-const VERSION = 'hawk-v1';
+const VERSION = 'hawk-v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/data.js', 'js/indicators.js', 'js/drawings.js',

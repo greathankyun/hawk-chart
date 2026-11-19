@@ -290,6 +290,8 @@ button { cursor: pointer; }
   .side { top: 0; padding-top: var(--safe-t); }
 
   .badge.status { display: none; }
+  .sel-bar { top: auto; bottom: 64px; }
+  .badge.demo { bottom: 34px; }
   .sym-list-head span:nth-child(4), .sym-list li > span:nth-child(4) { display: none; }
   .sym-list-head, .sym-list li { grid-template-columns: 1.3fr 1fr .8fr 30px; }
   .modal { padding-top: calc(4vh + var(--safe-t)); }

@@ -26,3 +26,6 @@
 本地執行：`python3 -m http.server` 後開啟 http://localhost:8000
 
 本 App 僅供看盤參考，不構成投資建議。
+
+## 測試
+`node tests/e2e.js`（需要 Playwright）：在模擬資料模式下，以電腦版與 iPhone 觸控版面把所有功能跑一遍。
