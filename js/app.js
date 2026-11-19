@@ -3,6 +3,8 @@ import { INTERVALS, intervalSec, fetchKlines, fetchAllTickers, fetchTicker, spli
 import * as D from './data.js';
 import { CATALOG, SEED_WATCH } from './markets.js';
 import { Drawings, TOOLS, COLORS } from './drawings.js';
+import { IndicatorLayer, hexA } from './render.js';
+import { initFeatures } from './features.js';
 
 const LC = window.LightweightCharts;
 const $ = s => document.querySelector(s);
@@ -14,6 +16,8 @@ const DEFAULTS = {
   indicators: I.DEFAULT_INDICATORS,
   watchlist: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'LINKUSDT', 'AVAXUSDT', 'ETHBTC'],
   alerts: [],
+  scripts: [], templates: [],
+  layout: { mode: '1', cells: [], sync: { symbol: true, crosshair: true, time: false } },
   settings: { colors: 'tw', theme: 'dark', tz: 'local', magnet: false },
   sideHidden: false,
 };
@@ -25,7 +29,7 @@ if (!S.mktSeeded) { S.watchlist = [...S.watchlist, ...SEED_WATCH.filter(s => !S.
 const save = () => { try { localStorage.setItem('hawk.state', JSON.stringify(S)); } catch {} };
 
 // ---------- runtime ----------
-let chart, mainSeries, indSeries = [], indCache = {}, alertLines = [];
+let chart, mainSeries, layer;
 let bars = [], disp = [];
 let klineStream, wlStream, loadCtl, loadingMore = false, exhausted = false;
 const tickers = {}; // symbol -> {last, chgPct, high, low, vol, qvol}
@@ -34,9 +38,11 @@ let drawings;
 const CHART_TYPES = [
   { k: 'candle', name: 'K 線', icon: 'M8 3h2v3h2v11h-2v4H8v-4H6V6h2zm7 4h2v3h2v7h-2v3h-2v-3h-2v-7h2z' },
   { k: 'ha', name: '平均 K', icon: 'M6 6h5v12H6zm7 3h5v9h-5zM8 3h1v3H8zm0 15h1v3H8zm7-12h1v3h-1zm0 12h1v3h-1z' },
+  { k: 'hollow', name: '空心 K 線', icon: 'M8 3h2v3h2v11h-2v4H8v-4H6V6h2zm0 5v7h2V8zm7-1h2v3h2v7h-2v3h-2v-3h-2v-7h2z' },
   { k: 'bar', name: '美國線', icon: 'M8 3h2v18H8zM5 8h3v2H5zm5 6h3v2h-3zm6-9h2v14h-2zm-3 3h3v2h-3zm5 6h3v2h-3z' },
   { k: 'line', name: '折線', icon: 'M3 17l5-6 4 3 8-9 1.4 1.4-9.2 10.3-4-3-4.6 5.5z' },
   { k: 'area', name: '面積', icon: 'M3 17l5-6 4 3 8-9v16H3z' },
+  { k: 'baseline', name: '基準線', icon: 'M2 11h20v2H2zm1-1l4-5 4 3 3-4 1.5 1.2L11 10.4 7.3 7.6 4.6 11zm0 4h18l-3 5-4-3-4 3z' },
 ];
 
 // ---------- helpers ----------
@@ -73,7 +79,10 @@ const fmtS = (sym, p) => (p == null || isNaN(p) ? '—' : fmtP(p, decFor(sym, p)
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function toast(msg, ms = 3500) { const t = el('div', 'toast', msg); $('#toasts').append(t); setTimeout(() => t.remove(), ms); }
-function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+// tiny event bus so feature modules (layout, replay, alerts, …) can follow the main chart
+const listeners = {};
+const on = (ev, fn) => (listeners[ev] ||= []).push(fn);
+const emit = (ev, ...a) => (listeners[ev] || []).forEach(fn => { try { fn(...a); } catch (e) { console.error(e); } });
 
 // ---------- theme ----------
 function applyTheme() {
@@ -81,19 +90,23 @@ function applyTheme() {
   document.documentElement.dataset.colors = S.settings.colors;
   document.querySelector('meta[name="theme-color"]').content = css('--panel');
   if (!chart) return;
+  chart.applyOptions(themeOptions());
+  emit('theme');
+}
+function themeOptions() {
   const dark = S.settings.theme === 'dark';
-  chart.applyOptions({
+  return {
     layout: { background: { color: css('--bg') }, textColor: css('--muted'), panes: { separatorColor: css('--border'), separatorHoverColor: hexA('#f5a524', .3) } },
     grid: { vertLines: { color: dark ? 'rgba(30,43,66,.55)' : 'rgba(221,227,236,.8)' }, horzLines: { color: dark ? 'rgba(30,43,66,.55)' : 'rgba(221,227,236,.8)' } },
     rightPriceScale: { borderColor: css('--border') },
     timeScale: { borderColor: css('--border') },
     crosshair: { vertLine: { color: dark ? '#4b5b78' : '#9aa6bb', labelBackgroundColor: dark ? '#26354f' : '#55627a' }, horzLine: { color: dark ? '#4b5b78' : '#9aa6bb', labelBackgroundColor: dark ? '#26354f' : '#55627a' } },
-  });
+  };
 }
 
 // ---------- chart ----------
-function createChart() {
-  chart = LC.createChart($('#chart'), {
+function baseOptions(getInterval = () => S.interval) {
+  return {
     autoSize: true,
     layout: { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", sans-serif', fontSize: 11, attributionLogo: false },
     crosshair: { mode: LC.CrosshairMode.Normal },
@@ -105,12 +118,15 @@ function createChart() {
         const d = new Date(t * 1000);
         const p = n => String(n).padStart(2, '0');
         const date = `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())}`;
-        return intervalSec(S.interval) >= 86400 ? date : `${date} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+        return intervalSec(getInterval()) >= 86400 ? date : `${date} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
       },
     },
-  });
+  };
+}
+function createChart() {
+  chart = LC.createChart($('#chart'), baseOptions());
   applyTheme();
-  chart.subscribeCrosshairMove(p => updateLegend(p.logical != null && p.point ? Math.round(p.logical) : null));
+  chart.subscribeCrosshairMove(p => { updateLegend(p.logical != null && p.point ? Math.round(p.logical) : null); emit('crosshair', p); });
   chart.timeScale().subscribeVisibleLogicalRangeChange(r => { if (r && r.from < 30) loadMore(); });
   new ResizeObserver(() => updateLegend(crosshairIdx)).observe($('#chart'));
 }
@@ -122,98 +138,35 @@ function upDown() {
 
 function buildSeries() {
   // remove everything, then recreate main + indicator series
-  for (const s of [mainSeries, ...indSeries.flatMap(x => x.series)]) if (s) try { chart.removeSeries(s); } catch {}
-  indSeries = []; alertLines = [];
+  layer.clear();
+  if (mainSeries) try { chart.removeSeries(mainSeries); } catch {}
+  markersApi = null;
   while (chart.panes().length > 1) chart.removePane(chart.panes().length - 1);
 
   const { up, down } = upDown();
   const pf = { type: 'price', precision: priceDec, minMove: 1 / 10 ** priceDec };
   const t = S.chartType;
   if (t === 'candle' || t === 'ha') mainSeries = chart.addSeries(LC.CandlestickSeries, { upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down, priceFormat: pf });
+  else if (t === 'hollow') mainSeries = chart.addSeries(LC.CandlestickSeries, { upColor: 'rgba(0,0,0,0)', downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down, priceFormat: pf });
   else if (t === 'bar') mainSeries = chart.addSeries(LC.BarSeries, { upColor: up, downColor: down, thinBars: false, priceFormat: pf });
   else if (t === 'line') mainSeries = chart.addSeries(LC.LineSeries, { color: '#38bdf8', lineWidth: 2, priceFormat: pf });
+  else if (t === 'baseline') mainSeries = chart.addSeries(LC.BaselineSeries, { baseValue: { type: 'price', price: bars.length ? bars[Math.max(0, bars.length - 160)].close : 0 }, topLineColor: up, bottomLineColor: down, topFillColor1: hexA(up, .28), topFillColor2: hexA(up, .04), bottomFillColor1: hexA(down, .04), bottomFillColor2: hexA(down, .28), lineWidth: 2, priceFormat: pf });
   else mainSeries = chart.addSeries(LC.AreaSeries, { lineColor: '#38bdf8', topColor: 'rgba(56,189,248,.35)', bottomColor: 'rgba(56,189,248,0)', lineWidth: 2, priceFormat: pf });
 
-  let pane = 1;
-  for (const ind of S.indicators) {
-    const def = I.CATALOG[ind.type];
-    if (!def) continue;
-    const pi = def.overlay ? 0 : pane++;
-    const line = (color, extra = {}) => chart.addSeries(LC.LineSeries, { color, lineWidth: 1.5, priceLineVisible: false, lastValueVisible: !def.overlay || ind.type !== 'VOL', crosshairMarkerVisible: false, priceFormat: def.overlay ? pf : { type: 'price', precision: 2, minMove: 0.01 }, ...extra }, pi);
-    let series = [];
-    switch (ind.type) {
-      case 'MA': case 'EMA': case 'VWAP': series = [line(ind.color)]; break;
-      case 'BOLL': series = [line(ind.color), line(hexA(ind.color, .8), { lineStyle: 2 }), line(hexA(ind.color, .8), { lineStyle: 2 })]; break;
-      case 'VOL': {
-        const v = chart.addSeries(LC.HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false }, 0);
-        chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-        series = [v]; break;
-      }
-      case 'RSI': {
-        const s = line(ind.color);
-        s.createPriceLine({ price: 70, color: hexA('#ef4444', .5), lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
-        s.createPriceLine({ price: 30, color: hexA('#10b981', .5), lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
-        series = [s]; break;
-      }
-      case 'KD': {
-        const k = line(ind.color), d = line('#38bdf8');
-        k.createPriceLine({ price: 80, color: hexA('#ef4444', .5), lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
-        k.createPriceLine({ price: 20, color: hexA('#10b981', .5), lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
-        series = [k, d]; break;
-      }
-      case 'MACD': {
-        const h = chart.addSeries(LC.HistogramSeries, { priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'price', precision: priceDec + 1, minMove: 1 / 10 ** (priceDec + 1) } }, pi);
-        const m = line(ind.color, { priceFormat: { type: 'price', precision: priceDec + 1, minMove: 1 / 10 ** (priceDec + 1) } });
-        const s = line('#f5a524', { priceFormat: { type: 'price', precision: priceDec + 1, minMove: 1 / 10 ** (priceDec + 1) } });
-        series = [h, m, s]; break;
-      }
-      case 'ATR': series = [line(ind.color, { priceFormat: pf })]; break;
-    }
-    indSeries.push({ ind, series, pane: pi });
-  }
+  layer.build(S.indicators, bars);
   const panes = chart.panes();
   panes.forEach((p, i) => p.setStretchFactor(i === 0 ? 3.2 : 1));
-  const hasVol = S.indicators.some(x => x.type === 'VOL');
+  const hasVol = S.indicators.some(x => x.type === 'VOL' && !x.hidden);
   mainSeries.priceScale().applyOptions({ scaleMargins: { top: 0.12, bottom: hasVol ? 0.22 : 0.08 } });
   setAllData(false);
-  drawAlertLines();
-}
-
-function computeIndicators() {
-  indCache = {};
-  for (const { ind } of indSeries) {
-    const p = ind.p || {};
-    switch (ind.type) {
-      case 'MA': indCache[ind.id] = [I.sma(bars.map(b => b.close), p.n)]; break;
-      case 'EMA': indCache[ind.id] = [I.ema(bars.map(b => b.close), p.n)]; break;
-      case 'VWAP': indCache[ind.id] = [I.vwap(bars)]; break;
-      case 'BOLL': { const r = I.bollinger(bars, p.n, p.m); indCache[ind.id] = [r.mid, r.upper, r.lower]; break; }
-      case 'VOL': indCache[ind.id] = [bars.map(b => b.volume)]; break;
-      case 'RSI': indCache[ind.id] = [I.rsi(bars, p.n)]; break;
-      case 'KD': { const r = I.kd(bars, p.n); indCache[ind.id] = [r.k, r.d]; break; }
-      case 'MACD': { const r = I.macd(bars, p.f, p.s, p.g); indCache[ind.id] = [r.hist, r.line, r.signal]; break; }
-      case 'ATR': indCache[ind.id] = [I.atr(bars, p.n)]; break;
-    }
-  }
-}
-
-function pointFor(ind, k, i, v) {
-  const time = disp[i].time;
-  if (v == null) return { time };
-  const { up, down } = upDown();
-  if (ind.type === 'VOL') return { time, value: v, color: hexA(bars[i].close >= bars[i].open ? up : down, .45) };
-  if (ind.type === 'MACD' && k === 0) {
-    const prev = indCache[ind.id][0][i - 1];
-    const c = v >= 0 ? (prev != null && v < prev ? hexA(up, .45) : up) : (prev != null && v > prev ? hexA(down, .45) : down);
-    return { time, value: v, color: c };
-  }
-  return { time, value: v };
+  emit('build');
 }
 
 function makeDisp() {
   const off = tzOffset();
   const base = S.chartType === 'ha' ? I.heikinAshi(bars) : bars;
-  disp = base.map(b => (S.chartType === 'line' || S.chartType === 'area') ? { time: b.utc + off, value: b.close } : { time: b.utc + off, open: b.open, high: b.high, low: b.low, close: b.close });
+  const single = S.chartType === 'line' || S.chartType === 'area' || S.chartType === 'baseline';
+  disp = base.map(b => single ? { time: b.utc + off, value: b.close } : { time: b.utc + off, open: b.open, high: b.high, low: b.low, close: b.close });
 }
 
 function setAllData(keepRange = true, shift = 0) {
@@ -221,14 +174,12 @@ function setAllData(keepRange = true, shift = 0) {
   const range = keepRange ? ts.getVisibleLogicalRange() : null;
   makeDisp();
   mainSeries.setData(disp);
-  computeIndicators();
-  for (const { ind, series } of indSeries) {
-    const arrs = indCache[ind.id] || [];
-    series.forEach((s, k) => s.setData((arrs[k] || []).map((v, i) => pointFor(ind, k, i, v))));
-  }
+  layer.setData(bars, disp);
+  applyMarkers();
   if (range) ts.setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
   else if (bars.length) ts.setVisibleLogicalRange({ from: Math.max(0, bars.length - 160), to: bars.length + 8 });
   updateLegend(null);
+  emit('data');
 }
 
 let tickPending = false;
@@ -238,16 +189,25 @@ function applyTick() {
   const n = bars.length - 1;
   makeDisp();
   mainSeries.update(disp[n]);
-  computeIndicators();
-  for (const { ind, series } of indSeries) {
-    const arrs = indCache[ind.id] || [];
-    series.forEach((s, k) => { try { s.update(pointFor(ind, k, n, arrs[k]?.[n])); } catch {} });
-  }
+  layer.updateLast(bars, disp);
   if (!crosshairIdx) updateLegend(null);
+  emit('tick');
 }
+
+// ---------- series markers (backtest trades, script signals) ----------
+let markersApi = null, markerList = [];
+function applyMarkers() {
+  if (!mainSeries) return;
+  const off = tzOffset();
+  const list = markerList.map(m => ({ ...m, time: m.utc + off })).filter(m => !bars.length || m.utc <= bars[bars.length - 1].utc).sort((a, b) => a.time - b.time);
+  if (!markersApi) { if (!list.length) return; markersApi = LC.createSeriesMarkers(mainSeries, list); }
+  else markersApi.setMarkers(list);
+}
+function setMarkers(list) { markerList = list || []; applyMarkers(); }
 
 // ---------- legend ----------
 let crosshairIdx = null;
+const fmtInd = (def, v) => v == null || Number.isNaN(v) ? '—' : def.fmt === 'vol' ? fmtBig(v) : def.overlay || def.fmt === 'price' ? fmt(v) : def.fmt === 'price+' ? (+v).toFixed(priceDec + 1) : (+v).toFixed(2);
 function updateLegend(idx) {
   crosshairIdx = idx;
   const n = bars.length;
@@ -258,18 +218,17 @@ function updateLegend(idx) {
   const chgPct = prev ? (chg / prev.close) * 100 : 0;
   const c = cls(chg);
   const iv = INTERVALS.find(x => x.k === S.interval);
-  let html = `<div class="l-main"><span class="l-sym">${symLabel(S.symbol)}</span><span class="l-tag">${iv.label} · ${esc(srcLabel(S.symbol))}</span>
+  let html = `<div class="l-main"><span class="l-sym">${symLabel(S.symbol)}</span><span class="l-tag">${iv.label} · ${esc(srcLabel(S.symbol))}${replayCtl ? ' · <b class="l-replay">回放中</b>' : ''}</span>
     <span><span class="l-k">開</span><span class="${c}">${fmt(b.open)}</span></span>
     <span><span class="l-k">高</span><span class="${c}">${fmt(b.high)}</span></span>
     <span><span class="l-k">低</span><span class="${c}">${fmt(b.low)}</span></span>
     <span><span class="l-k">收</span><span class="${c}">${fmt(b.close)}</span></span>
     <span class="${c}">${chg >= 0 ? '+' : ''}${fmt(chg)} (${pct(chgPct)})</span>
     <span><span class="l-k">量</span>${fmtBig(b.volume)}</span></div><div class="l-ind">`;
-  for (const { ind } of indSeries) {
-    const def = I.CATALOG[ind.type];
-    if (!def.overlay || ind.type === 'VOL') continue;
-    const vals = (indCache[ind.id] || []).map(a => a[i]);
-    html += `<span style="color:${ind.color}">${I.label(ind)} <b>${vals.map(v => fmt(v)).join(' / ')}</b></span>`;
+  const rows = layer.values(i);
+  for (const r of rows) {
+    if (r.pane !== 0 || r.def.special === 'vol') continue;
+    html += `<span style="color:${r.ind.color}">${esc(I.label(r.ind))} <b>${r.vals.map(v => fmtInd(r.def, v)).join(' / ')}</b></span>`;
   }
   html += '</div>';
   $('#legend').innerHTML = html;
@@ -278,13 +237,12 @@ function updateLegend(idx) {
   let out = '', top = 0;
   let sizes;
   try { sizes = chart.panes().map((_, k) => chart.paneSize(k).height); } catch { requestAnimationFrame(() => updateLegend(crosshairIdx)); box.innerHTML = ''; return; }
-  for (const { ind, pane } of indSeries) {
-    if (pane === 0) continue;
-    top = sizes.slice(0, pane).reduce((a, h) => a + h + 1, 0);
-    const vals = (indCache[ind.id] || []).map(a => a[i]);
-    const names = { MACD: ['柱', 'DIF', 'DEA'], KD: ['K', 'D'] }[ind.type];
-    const parts = vals.map((v, k) => (names ? `<span class="l-k">${names[k]}</span>` : '') + `<b>${v == null ? '—' : (+v).toFixed(ind.type === 'MACD' || ind.type === 'ATR' ? priceDec + 1 : 2)}</b>`).join(' ');
-    out += `<div class="pane-legend" style="top:${top + 4}px"><span style="color:${ind.color}">${I.label(ind)}</span> ${parts}</div>`;
+  for (const r of rows) {
+    if (r.pane === 0) continue;
+    top = sizes.slice(0, r.pane).reduce((a, h) => a + h + 1, 0);
+    const multi = r.vals.length > 1;
+    const parts = r.vals.map((v, k) => (multi ? `<span class="l-k">${esc(r.names[k] || '')}</span>` : '') + `<b>${fmtInd(r.def, v)}</b>`).join(' ');
+    out += `<div class="pane-legend" style="top:${top + 4}px"><span style="color:${r.ind.color}">${esc(I.label(r.ind))}</span> ${parts}${r.def.error ? ` <span class="down">⚠ ${esc(r.def.error)}</span>` : ''}</div>`;
   }
   box.innerHTML = out;
 }
@@ -295,6 +253,7 @@ async function loadSymbol() {
   const ctl = loadCtl = new AbortController();
   $('#loading').classList.add('on');
   klineStream?.close();
+  if (replayCtl) replayStop(false);
   exhausted = false;
   bars = [];
   drawings.setSymbol(S.symbol);
@@ -311,6 +270,7 @@ async function loadSymbol() {
     klineStream = subscribeKlines(S.symbol, S.interval, onKline, st => setStatus(st));
     const tk = await fetchTicker(S.symbol);
     if (tk) { tickers[S.symbol] = { ...tickers[S.symbol], ...tk }; renderHeader(); renderDetail(); }
+    emit('loaded');
   } catch (e) {
     if (e.name !== 'AbortError') { toast('載入失敗：' + e.message); bars = []; buildSeries(); }
   } finally {
@@ -330,6 +290,7 @@ async function loadMore() {
     if (!older.length) { exhausted = true; return; }
     if (rows.length < 1000) exhausted = true;
     bars = older.concat(bars);
+    if (replayCtl) replayCtl.full = older.concat(replayCtl.full);
     setAllData(true, older.length);
   } catch {} finally { loadingMore = false; }
 }
@@ -337,12 +298,42 @@ async function loadMore() {
 function onKline(b) {
   if (!b || !bars.length) return;
   const bar = { ...b, intraday: bars[0].intraday };
-  const last = bars[bars.length - 1];
-  if (bar.utc === last.utc) bars[bars.length - 1] = bar;
-  else if (bar.utc > last.utc) bars.push(bar);
+  const arr = replayCtl ? replayCtl.full : bars; // during replay live bars are kept aside
+  const last = arr[arr.length - 1];
+  if (bar.utc === last.utc) arr[arr.length - 1] = bar;
+  else if (bar.utc > last.utc) arr.push(bar);
   else return;
+  if (replayCtl) return;
   if (!tickPending) { tickPending = true; setTimeout(applyTick, 200); }
   priceUpdate(S.symbol, bar.close);
+}
+
+// ---------- bar replay core (UI lives in replay.js) ----------
+let replayCtl = null; // { full: all bars }
+function replayStart(idx) {
+  if (!bars.length) return;
+  if (!replayCtl) replayCtl = { full: bars };
+  bars = replayCtl.full.slice(0, Math.max(2, Math.min(replayCtl.full.length, idx + 1)));
+  setAllData(true);
+  const ts = chart.timeScale(), r = ts.getVisibleLogicalRange();
+  if (r && r.to < bars.length) ts.setVisibleLogicalRange({ from: bars.length - (r.to - r.from) + 10, to: bars.length + 10 });
+  emit('replay');
+}
+function replayStep(k = 1) {
+  if (!replayCtl) return false;
+  const f = replayCtl.full;
+  if (bars.length >= f.length) return false;
+  if (k === 1) { bars.push(f[bars.length]); applyTick(); }
+  else { bars = f.slice(0, Math.min(f.length, bars.length + k)); setAllData(true); }
+  emit('replayStep');
+  return bars.length < f.length;
+}
+function replayBack() { if (!replayCtl || bars.length <= 2) return; bars = bars.slice(0, -1); setAllData(true); emit('replayStep'); }
+function replayStop(redraw = true) {
+  if (!replayCtl) return;
+  bars = replayCtl.full; replayCtl = null;
+  if (redraw) { setAllData(true); chart.timeScale().scrollToRealTime(); }
+  emit('replay');
 }
 
 function setStatus(st) {
@@ -471,69 +462,13 @@ function switchSymbol(sym) {
   if (sym === S.symbol) return;
   S.symbol = sym; save();
   renderWatchlist();
-  renderAlerts();
+  emit('symbol', sym);
   loadSymbol();
   restartWatchStream();
 }
 
-// ---------- alerts ----------
-const lastSeen = {};
-function priceUpdate(sym, price) {
-  const prev = lastSeen[sym];
-  lastSeen[sym] = price;
-  if (prev == null) return;
-  let changed = false;
-  for (const a of S.alerts) {
-    if (a.fired || a.symbol !== sym) continue;
-    if ((a.dir === 'above' && prev < a.price && price >= a.price) || (a.dir === 'below' && prev > a.price && price <= a.price)) {
-      a.fired = true; changed = true;
-      const msg = `${symLabel(sym)} ${a.dir === 'above' ? '漲破' : '跌破'} ${fmtS(sym, a.price)}（現價 ${fmtS(sym, price)}）`;
-      toast('🔔 ' + msg, 8000);
-      notify('鷹眼看盤 價格警示', msg);
-    }
-  }
-  if (changed) { save(); renderAlerts(); drawAlertLines(); }
-}
-async function notify(title, body) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  try {
-    const reg = await navigator.serviceWorker?.getRegistration();
-    if (reg) reg.showNotification(title, { body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' });
-    else new Notification(title, { body });
-  } catch {}
-}
-function renderAlerts() {
-  const ul = $('#alerts');
-  ul.innerHTML = '';
-  const list = S.alerts.filter(a => a.symbol === S.symbol);
-  if (!list.length) { ul.append(el('li', 'empty', `${symLabel(S.symbol)} 尚無警示`)); return; }
-  for (const a of list) {
-    const li = el('li', a.fired ? 'fired' : '');
-    li.innerHTML = `<span class="a-txt">${a.dir === 'above' ? '漲破' : '跌破'} <b>${fmtS(S.symbol, a.price)}</b></span><button class="icon-btn danger" title="刪除">✕</button>`;
-    li.querySelector('button').onclick = () => { S.alerts = S.alerts.filter(x => x !== a); save(); renderAlerts(); drawAlertLines(); };
-    ul.append(li);
-  }
-}
-function drawAlertLines() {
-  if (!mainSeries) return;
-  for (const l of alertLines) try { mainSeries.removePriceLine(l); } catch {}
-  alertLines = S.alerts.filter(a => a.symbol === S.symbol && !a.fired).map(a =>
-    mainSeries.createPriceLine({ price: a.price, color: '#f5a524', lineStyle: 1, lineWidth: 1, axisLabelVisible: true, title: '🔔' }));
-}
-$('#alertForm').onsubmit = e => {
-  e.preventDefault();
-  const price = parseFloat($('#alertPrice').value);
-  if (!(price > 0)) return;
-  S.alerts.push({ id: Date.now(), symbol: S.symbol, dir: $('#alertDir').value, price, fired: false });
-  save(); renderAlerts(); drawAlertLines();
-  $('#alertPrice').value = '';
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
-  toast(`已新增警示：${symLabel(S.symbol)} ${$('#alertDir').value === 'above' ? '漲破' : '跌破'} ${fmtS(S.symbol, price)}`);
-};
-$('#alertPrice').addEventListener('focus', () => {
-  const last = bars[bars.length - 1]?.close;
-  if (!$('#alertPrice').value && last) $('#alertPrice').placeholder = fmtS(S.symbol, last).replace(/,/g, '');
-});
+// ---------- alerts (engine + UI in alerts.js) ----------
+const priceUpdate = (sym, price) => emit('price', sym, price);
 
 // ---------- symbol search ----------
 const MKT_TABS = [['fav', '★ 自選'], ['all', '全部'], ['crypto', '加密貨幣'], ['tw', '台股'], ['us', '美股'], ['idx', '指數'], ['cmd', '原物料'], ['fx', '外匯']];
@@ -541,9 +476,14 @@ const CRYPTO_QUOTES = ['USDT', 'FDUSD', 'USDC', 'BTC', 'ETH', 'BNB', '全部'];
 let symAll = [], mktTab = 'crypto', quoteTab = 'USDT', kbIdx = 0, symShown = [], remoteSyms = [], remoteQ = '', remoteTimer = null, remoteCtl = null, twAll = [];
 function openModal(id) { $(id).hidden = false; }
 function closeModals() { document.querySelectorAll('.modal').forEach(m => (m.hidden = true)); }
-document.querySelectorAll('.modal').forEach(m => m.addEventListener('pointerdown', e => { if (e.target === m || e.target.closest('[data-close]')) closeModals(); }));
+const bindModal = m => m.addEventListener('pointerdown', e => { if (e.target === m || e.target.closest('[data-close]')) closeModals(); });
+document.querySelectorAll('.modal').forEach(bindModal);
 
-async function openSearch(prefill = '', tab) {
+// When a feature (e.g. a layout cell) asks for a symbol, the pick goes to it instead of the main chart.
+let pickCb = null;
+function chooseSymbol(sym) { const cb = pickCb; pickCb = null; if (cb) cb(sym); else switchSymbol(sym); }
+async function openSearch(prefill = '', tab, onPick = null) {
+  pickCb = onPick;
   if (tab) mktTab = tab;
   openModal('#symModal');
   const inp = $('#symSearch');
@@ -644,7 +584,7 @@ function renderSymList() {
 }
 function pickSymbol({ symbol, t }) {
   if (t) tickers[symbol] = { ...tickers[symbol], ...t };
-  closeModals(); switchSymbol(symbol);
+  closeModals(); chooseSymbol(symbol);
 }
 let fillGen = 0;
 async function fillQuotes(syms) {
@@ -692,43 +632,77 @@ $('#symBtn').onclick = () => openSearch();
 $('#addWatch').onclick = () => openSearch('', 'all');
 
 // ---------- indicators UI ----------
+let indQuery = '';
 function renderIndModal() {
   const act = $('#indActive');
   act.innerHTML = '';
   if (!S.indicators.length) act.append(el('li', 'empty', '尚未加入指標'));
   for (const ind of S.indicators) {
-    const def = I.CATALOG[ind.type];
-    const li = el('li');
-    li.append(el('span', 'i-name', ind.type));
-    for (const p of def.params) {
+    const def = ind.type === 'SCRIPT' ? null : I.CATALOG[ind.type];
+    if (ind.type !== 'SCRIPT' && !def) continue;
+    const li = el('li', ind.hidden ? 'off' : '');
+    li.append(el('span', 'i-name', esc(I.label(ind).split(' ')[0])));
+    for (const p of def?.params || []) {
       const lab = el('label', '', `<small>${p.label}</small> `);
-      const inp = el('input'); inp.type = 'number'; inp.min = 1; inp.step = p.k === 'm' ? 0.1 : 1; inp.value = ind.p[p.k];
+      const inp = el('input'); inp.type = 'number'; inp.min = p.step && p.step < 1 ? p.step : 1; inp.step = p.step || 1; inp.value = ind.p[p.k] ?? p.def;
       inp.onchange = () => { const v = parseFloat(inp.value); if (v > 0) { ind.p[p.k] = v; save(); buildSeries(); } };
       lab.append(inp); li.append(lab);
+    }
+    if (ind.type === 'SCRIPT') {
+      const ed = el('button', 'btn', '編輯腳本'); ed.onclick = () => { closeModals(); emit('editScript', ind.sid); };
+      li.append(ed);
     }
     const col = el('input'); col.type = 'color'; col.value = ind.color; col.title = '顏色';
     col.oninput = () => { ind.color = col.value; save(); buildSeries(); };
     li.append(el('span', 'i-sp'), col);
+    const eye = el('button', 'icon-btn', ind.hidden ? '◌' : '◉'); eye.title = ind.hidden ? '顯示' : '隱藏';
+    eye.onclick = () => { ind.hidden = !ind.hidden; save(); buildSeries(); renderIndModal(); };
     const del = el('button', 'icon-btn danger', '✕'); del.title = '移除';
     del.onclick = () => { S.indicators = S.indicators.filter(x => x !== ind); save(); buildSeries(); renderIndModal(); };
-    li.append(del);
+    li.append(eye, del);
     act.append(li);
   }
   const cat = $('#indCatalog');
   cat.innerHTML = '';
-  for (const [k, def] of Object.entries(I.CATALOG)) {
-    const li = el('li', '', `<span>${def.name}</span><small>${def.overlay ? '疊加主圖' : '副圖'}</small>`);
-    li.onclick = () => {
-      const p = Object.fromEntries(def.params.map(x => [x.k, x.def]));
-      const used = S.indicators.filter(x => x.type === k).length;
-      const palette = ['#f5a524', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf', '#facc15'];
-      S.indicators.push({ id: 'i' + Date.now(), type: k, p, color: used ? palette[used % palette.length] : def.colors[0] });
-      save(); buildSeries(); renderIndModal();
-    };
-    cat.append(li);
+  const q = indQuery.trim().toLowerCase();
+  const palette = ['#f5a524', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf', '#facc15'];
+  for (const [g, gname] of Object.entries(I.GROUPS)) {
+    const entries = Object.entries(I.CATALOG).filter(([k, d]) => d.g === g && !d.hidden && (!q || (k + d.name).toLowerCase().includes(q)));
+    const scripts = g === 'other' ? (S.scripts || []).filter(sc => !q || sc.name.toLowerCase().includes(q)) : [];
+    if (!entries.length && !scripts.length && g !== 'other') continue;
+    cat.append(el('li', 'i-group', gname === '其他' ? '自訂腳本' : gname));
+    for (const [k, def] of entries) {
+      const li = el('li', '', `<span>${def.name}</span><small>${def.overlay ? '疊加主圖' : '副圖'}</small>`);
+      li.onclick = () => {
+        const used = S.indicators.filter(x => x.type === k).length;
+        S.indicators.push({ id: 'i' + Date.now(), type: k, p: I.withDefaults(k), color: used ? palette[used % palette.length] : def.colors[0] });
+        save(); buildSeries(); renderIndModal();
+      };
+      cat.append(li);
+    }
+    for (const sc of scripts) {
+      const li = el('li', '', `<span>📜 ${esc(sc.name)}</span><small>${sc.overlay ? '疊加主圖' : '副圖'}</small>`);
+      li.onclick = () => { addScriptIndicator(sc); renderIndModal(); };
+      cat.append(li);
+    }
+    if (g === 'other') {
+      const li = el('li', 'i-new', '<span>＋ 新增／編輯自訂腳本…</span>');
+      li.onclick = () => { closeModals(); emit('editScript', null); };
+      cat.append(li);
+    }
   }
 }
-$('#indBtn').onclick = () => { renderIndModal(); openModal('#indModal'); };
+function addScriptIndicator(sc) {
+  S.indicators = S.indicators.filter(x => !(x.type === 'SCRIPT' && x.sid === sc.id));
+  S.indicators.push({ id: 'i' + Date.now(), type: 'SCRIPT', sid: sc.id, name: sc.name, p: {}, inputs: {}, color: '#38bdf8' });
+  save(); buildSeries();
+}
+$('#indBtn').onclick = () => { indQuery = ''; renderIndModal(); openModal('#indModal'); const f = $('#indFilter'); if (f) { f.value = ''; if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => f.focus(), 30); } };
+(() => {
+  const f = el('input', 'ind-filter'); f.id = 'indFilter'; f.type = 'search'; f.placeholder = '搜尋指標，例如 RSI、布林、均線'; f.autocomplete = 'off';
+  f.oninput = () => { indQuery = f.value; renderIndModal(); };
+  $('#indCatalog').before(f);
+})();
 
 // ---------- settings ----------
 function openSettings() {
@@ -923,14 +897,31 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // ---------- boot ----------
 document.body.classList.toggle('app-noside', !!S.sideHidden);
 createChart();
+layer = new IndicatorLayer({ chart, upDown, priceDec: () => priceDec, getScript: sid => (S.scripts || []).find(x => x.id === sid) });
 drawings = new Drawings({
   chart, getSeries: () => mainSeries, overlay: $('#overlay'), container: $('.chart-wrap'),
   getBars: () => bars, getSec: () => intervalSec(S.interval), fmt: p => fmt(p),
   onSelect: d => renderSwatches(d), askText, onToolChange: () => renderDrawbar(),
 });
 drawings.magnet = S.settings.magnet;
-renderTimeframes(); renderTypes(); renderDrawbar(); renderWatchlist(); renderAlerts();
+renderTimeframes(); renderTypes(); renderDrawbar(); renderWatchlist();
+// API handed to the feature modules (layout, replay, alerts, screener, backtest, scripts, templates, cloud)
+const app = {
+  S, save, on, emit, $, el, baseOptions, themeOptions, esc, toast, fmt, fmtP, fmtS, fmtBig, pct, cls, symLabel, decimals, decFor, upDown, css, hexA, tzOffset,
+  get chart() { return chart; }, get mainSeries() { return mainSeries; }, get bars() { return bars; }, get priceDec() { return priceDec; },
+  get replaying() { return !!replayCtl; }, get replayTotal() { return replayCtl ? replayCtl.full.length : bars.length; },
+  get tickers() { return tickers; }, get layer() { return layer; },
+  openModal, closeModals, bindModal, openSearch: (prefill = '', onPick = null) => openSearch(prefill, undefined, onPick),
+  switchSymbol, loadSymbol, buildSeries, setAllData, setMarkers,
+  setInterval: k => { if (S.interval === k) return; S.interval = k; save(); renderTimeframes(); loadSymbol(); },
+  setChartType, addScriptIndicator, renderIndModal, notifyPerm: () => 'Notification' in window && Notification.permission === 'default' && Notification.requestPermission(),
+  replayStart, replayStep, replayBack, replayStop,
+  data: { fetchKlines, fetchAllTickers, fetchTicker, fetchQuotes, subscribeKlines, intervalSec, INTERVALS, splitSymbol, isCrypto, symbolMeta, getWorkerUrl: D.getWorkerUrl, isDemo: D.isDemo, get demoMode() { return D.demoMode; } },
+  I,
+};
+on('watchlistChanged', () => { renderWatchlist(); restartWatchStream(); });
+initFeatures(app);
 loadSymbol().then(() => { primeTickers(); restartWatchStream(); updateDemoBadge(); });
 if (D.getWorkerUrl()) D.loadTwList();
 window.addEventListener('online', () => { if (D.isDemo(S.symbol)) toast('網路已恢復，重新整理即可取得即時行情'); });
-window.__hawk = { S, get bars() { return bars; }, drawings, get chart() { return chart; } };
+window.__hawk = { S, get bars() { return bars; }, drawings, get chart() { return chart; }, app };
