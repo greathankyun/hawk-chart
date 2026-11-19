@@ -4,3 +4,12 @@ name = "hawk-chart"
 main = "src/index.js"
 compatibility_date = "2024-11-01"
 workers_dev = true
+
+# 跨裝置同步與伺服器端警示的儲存空間（KV）。id 由 Deploy Worker 流程自動建立並填入。
+[[kv_namespaces]]
+binding = "HAWK"
+id = "__KV_ID__"
+
+# 每分鐘檢查一次伺服器端警示
+[triggers]
+crons = ["* * * * *"]

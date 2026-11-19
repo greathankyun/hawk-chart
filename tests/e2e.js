@@ -25,8 +25,8 @@ const bx=await chartBox(p); const X=f=>bx.x+bx.width*f, Y=f=>bx.y+bx.height*f;
 for (const lbl of ['1分','5分','15分','30分','1時','4時','日','週','月','1時']){await p.click(`.tf-btn:text-is("${lbl}")`);await p.waitForTimeout(250);
  const iv=await p.evaluate(()=>window.__hawk.S.interval); const n=await p.evaluate(()=>window.__hawk.bars.length); ok(n>0,`tf ${lbl} bars ${n} iv ${iv}`);}
 // chart types
-for (let i=0;i<5;i++){await p.click(`#typeGroup button >> nth=${i}`);await p.waitForTimeout(150);}
-ok((await p.evaluate(()=>window.__hawk.S.chartType))==='area','chart type area');
+for (let i=0;i<7;i++){await p.click(`#typeGroup button >> nth=${i}`);await p.waitForTimeout(150);}
+ok((await p.evaluate(()=>window.__hawk.S.chartType))==="baseline","chart type baseline (last of 7)");
 await p.click('#typeGroup button >> nth=0');
 // --- trend line: draw, select, delete via sel-bar button
 await p.click('button[title="趨勢線"]');
@@ -101,7 +101,7 @@ const ni=await p.evaluate(()=>window.__hawk.S.indicators.length); ok(ni===11,'in
 await p.fill('#indActive li >> nth=0 >> input[type=number]','5');await p.press('#indActive li >> nth=0 >> input[type=number]','Tab');
 ok((await p.evaluate(()=>window.__hawk.S.indicators[0].p.n))===5,'param change');
 // remove all
-while(await p.locator('#indActive li button').count()) await p.click('#indActive li button >> nth=0');
+while(await p.locator('#indActive li button[title="移除"]').count()) await p.click('#indActive li button[title="移除"] >> nth=0');
 ok((await p.evaluate(()=>window.__hawk.S.indicators.length))===0,'all indicators removed');
 await p.click('#indCatalog li:has-text("MACD")');await p.click('#indCatalog li:has-text("成交量 VOL")');
 await p.keyboard.press('Escape');ok(await p.isHidden('#indModal'),'esc closes modal');
@@ -132,11 +132,11 @@ ok(await items(p)===0,'SOL has no drawings');
 // alerts
 const last=await p.evaluate(()=>window.__hawk.bars.at(-1).close);
 await p.selectOption('#alertDir','above');await p.fill('#alertPrice',String(last*1.0000001));await p.click('#alertForm button');
-ok((await p.locator('#alerts li:not(.empty)').count())===1,'alert added');
+ok((await p.locator('#alerts li:not(.empty):not(.a-log)').count())===1,'alert added');
 await p.waitForTimeout(6000);
 const fired=await p.evaluate(()=>window.__hawk.S.alerts.filter(a=>a.fired).length);
 console.log('alert fired (random walk, may be 0):',fired);
-await p.click('#alerts li button');ok((await p.locator('#alerts li:not(.empty)').count())===0,'alert deleted');
+await p.click('#alerts li button[title="刪除"]');ok((await p.locator('#alerts li:not(.empty):not(.a-log)').count())===0,'alert deleted');
 // settings
 await p.click('#setBtn');ok(await p.isVisible('#setModal'),'settings open');
 await p.selectOption('#setTheme','light');ok((await p.evaluate(()=>document.documentElement.dataset.theme))==='light','light theme');

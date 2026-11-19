@@ -1,11 +1,17 @@
 // 鷹眼看盤 Worker: one entry point, route modules mounted by path prefix.
 //   /market/*  行情中繼（台股、美股、指數、原物料、外匯）— market.js
+//   /sync/*    跨裝置同步（KV）— sync.js
+//   /alerts/*  伺服器端警示＋每分鐘排程檢查 — alerts.js
 // Other features add a line to ROUTES (and, if needed, a scheduled() handler below).
 import * as market from './market.js';
+import * as sync from './sync.js';
+import * as alerts from './alerts.js';
 import { json } from './util.js';
 
 const ROUTES = [
   ['/market/', market.handle],
+  ['/sync/', sync.handle],
+  ['/alerts', alerts.handle],
 ];
 
 // Pages allowed to call this worker from a browser. Override with the ALLOWED_ORIGINS var (comma separated).
@@ -46,5 +52,8 @@ export default {
       res = json({ error: e?.message || String(e) }, e?.status || 502);
     }
     return withCors(res, origin);
+  },
+  async scheduled(event, env, ctx) {
+    await alerts.scheduled(event, env, ctx);
   },
 };
