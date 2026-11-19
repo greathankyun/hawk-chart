@@ -1,0 +1,47 @@
+name: Deploy Worker
+# 部署行情中繼（Cloudflare Worker）。需要 repo secrets：CLOUDFLARE_API_TOKEN、CLOUDFLARE_ACCOUNT_ID；
+# 選配：FUGLE_API_KEY（富果台股即時）。沒設定 token 時會略過，不會失敗。
+on:
+  push:
+    branches: [main]
+    paths: ['worker/**', '.github/workflows/worker.yml']
+  workflow_dispatch:
+concurrency:
+  group: worker
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check secrets
+        id: chk
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then echo "go=1" >> "$GITHUB_OUTPUT"; else echo "::notice::尚未設定 CLOUDFLARE_API_TOKEN，略過部署"; fi
+      - name: Deploy
+        id: deploy
+        if: steps.chk.outputs.go == '1'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+      - name: Set Fugle key (optional)
+        if: steps.chk.outputs.go == '1'
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FUGLE_API_KEY: ${{ secrets.FUGLE_API_KEY }}
+        run: |
+          if [ -n "$FUGLE_API_KEY" ]; then printf '%s' "$FUGLE_API_KEY" | npx -y wrangler@3 secret put FUGLE_API_KEY; else echo "未設定 FUGLE_API_KEY（台股使用 Yahoo 延遲行情）"; fi
+      - name: Summary
+        if: steps.chk.outputs.go == '1'
+        env:
+          URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          echo "## 行情中繼已部署" >> "$GITHUB_STEP_SUMMARY"
+          echo "網址：${URL:-（見上方 Deploy 步驟的輸出，形如 https://hawk-chart.xxx.workers.dev）}" >> "$GITHUB_STEP_SUMMARY"
+          echo "把這個網址貼到 App 的「設定 → 行情中繼」。" >> "$GITHUB_STEP_SUMMARY"

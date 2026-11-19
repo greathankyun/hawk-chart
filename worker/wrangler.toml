@@ -1,0 +1,6 @@
+# 鷹眼看盤 中繼服務（Cloudflare Worker）
+# 由 .github/workflows/worker.yml 自動部署；選配的富果金鑰以 secret FUGLE_API_KEY 設定。
+name = "hawk-chart"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+workers_dev = true

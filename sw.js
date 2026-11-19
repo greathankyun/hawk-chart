@@ -1,8 +1,8 @@
 // App-shell cache: the UI works offline; market data always goes to the network.
-const VERSION = 'hawk-v2';
+const VERSION = 'hawk-v3';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/data.js', 'js/indicators.js', 'js/drawings.js',
+  'js/app.js', 'js/data.js', 'js/indicators.js', 'js/drawings.js', 'js/config.js', 'js/markets.js',
   'vendor/lightweight-charts.standalone.production.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
