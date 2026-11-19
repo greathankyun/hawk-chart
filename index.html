@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>鷹眼看盤</title>
+<meta name="description" content="鷹眼看盤：K 線圖、多週期、技術指標、畫線工具、自選清單與價格警示的跨平台看盤 App。">
+<meta name="theme-color" content="#0b1220">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="鷹眼看盤">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand" title="鷹眼看盤">
+      <img src="icons/icon.svg" alt="" width="26" height="26">
+      <span class="brand-name">鷹眼看盤</span>
+    </div>
+    <button class="sym-btn" id="symBtn" title="搜尋商品">
+      <span class="sym-name" id="symName">BTC/USDT</span>
+      <span class="sym-price" id="symPrice">—</span>
+      <span class="sym-chg" id="symChg"></span>
+      <svg viewBox="0 0 24 24" class="ico sm"><path d="M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm8.7 12.3 2 2-1.4 1.4-2-2z"/></svg>
+    </button>
+    <div class="tf-group" id="tfGroup"></div>
+    <div class="tb-actions">
+      <div class="seg" id="typeGroup" title="圖表類型"></div>
+      <button class="tb-btn" id="indBtn" title="技術指標">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M3 17l5-6 4 4 8-9 1.5 1.3L12 18l-4-4-3.5 4.2z"/></svg><span class="lbl">指標</span>
+      </button>
+      <button class="tb-btn" id="shotBtn" title="截圖">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M9 4l-1.5 2H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-3.5L15 4zm3 4a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
+      </button>
+      <button class="tb-btn" id="setBtn" title="設定">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm8.4 2.3-1.9-.3a6.9 6.9 0 0 0-.7-1.7l1.1-1.6-1.9-1.9-1.6 1.1a6.9 6.9 0 0 0-1.7-.7L13.4 3h-2.8l-.3 1.9a6.9 6.9 0 0 0-1.7.7L7 4.5 5.1 6.4l1.1 1.6a6.9 6.9 0 0 0-.7 1.7l-1.9.3v2.8l1.9.3c.2.6.4 1.2.7 1.7l-1.1 1.6 1.9 1.9 1.6-1.1c.5.3 1.1.5 1.7.7l.3 1.9h2.8l.3-1.9c.6-.2 1.2-.4 1.7-.7l1.6 1.1 1.9-1.9-1.1-1.6c.3-.5.5-1.1.7-1.7l1.9-.3z"/></svg>
+      </button>
+      <button class="tb-btn install" id="installBtn" hidden title="安裝 App">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M11 3h2v9.6l3.3-3.3 1.4 1.4L12 16.4l-5.7-5.7 1.4-1.4 3.3 3.3zM4 18h16v2H4z"/></svg><span class="lbl">安裝</span>
+      </button>
+      <button class="tb-btn" id="sideBtn" title="自選清單">
+        <svg viewBox="0 0 24 24" class="ico"><path d="M4 5h16v2H4zm0 6h16v2H4zm0 6h10v2H4z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+    <nav class="drawbar" id="drawbar" aria-label="畫線工具"></nav>
+
+    <main class="chart-wrap">
+      <div class="legend" id="legend"></div>
+      <div id="paneLegends"></div>
+      <div id="chart"></div>
+      <canvas id="overlay"></canvas>
+      <div class="sel-bar" id="selBar" hidden>
+        <div class="swatches" id="swatches"></div>
+        <button class="icon-btn danger" id="delDrawing" title="刪除">
+          <svg viewBox="0 0 24 24" class="ico"><path d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7z"/></svg>
+        </button>
+      </div>
+      <div class="badge demo" id="demoBadge" hidden>模擬資料（目前無法連線交易所）</div>
+      <div class="badge status" id="statusBadge"></div>
+      <div class="loading" id="loading"><div class="spinner"></div></div>
+    </main>
+
+    <aside class="side" id="side">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>自選清單</h2>
+          <span style="flex:1"></span>
+          <button class="icon-btn" id="addWatch" title="新增商品">
+            <svg viewBox="0 0 24 24" class="ico"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+          </button>
+          <button class="icon-btn side-close" id="sideClose" title="關閉">✕</button>
+        </div>
+        <div class="wl-head"><span>商品</span><span>價格</span><span>漲跌</span></div>
+        <ul class="watchlist" id="watchlist"></ul>
+      </section>
+      <section class="panel detail" id="detail"></section>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>價格警示</h2>
+        </div>
+        <form class="alert-form" id="alertForm">
+          <select id="alertDir" aria-label="條件">
+            <option value="above">漲破</option>
+            <option value="below">跌破</option>
+          </select>
+          <input id="alertPrice" type="number" step="any" inputmode="decimal" placeholder="價格" required>
+          <button type="submit" class="btn primary">新增</button>
+        </form>
+        <ul class="alerts" id="alerts"></ul>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<!-- Symbol search -->
+<div class="modal" id="symModal" hidden>
+  <div class="modal-card wide">
+    <div class="modal-head">
+      <input id="symSearch" type="search" placeholder="搜尋商品，例如 BTC、ETH、SOL" autocomplete="off" spellcheck="false">
+      <button class="icon-btn" data-close title="關閉">✕</button>
+    </div>
+    <div class="quote-tabs" id="quoteTabs"></div>
+    <div class="sym-list-head"><span>商品</span><span>最新價</span><span>24h 漲跌</span><span>24h 成交額</span><span></span></div>
+    <ul class="sym-list" id="symList"></ul>
+  </div>
+</div>
+
+<!-- Indicators -->
+<div class="modal" id="indModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>技術指標</h3>
+      <button class="icon-btn" data-close title="關閉">✕</button>
+    </div>
+    <div class="ind-body">
+      <h4>已加入</h4>
+      <ul class="ind-active" id="indActive"></ul>
+      <h4>新增指標</h4>
+      <ul class="ind-catalog" id="indCatalog"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- Settings -->
+<div class="modal" id="setModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3>設定</h3>
+      <button class="icon-btn" data-close title="關閉">✕</button>
+    </div>
+    <div class="set-body">
+      <label class="row"><span>漲跌顏色</span>
+        <select id="setColor">
+          <option value="tw">紅漲綠跌（台股習慣）</option>
+          <option value="intl">綠漲紅跌（國際習慣）</option>
+        </select>
+      </label>
+      <label class="row"><span>外觀</span>
+        <select id="setTheme">
+          <option value="dark">深色</option>
+          <option value="light">淺色</option>
+        </select>
+      </label>
+      <label class="row"><span>時區</span>
+        <select id="setTz">
+          <option value="local">本機時間</option>
+          <option value="utc">UTC</option>
+        </select>
+      </label>
+      <label class="row"><span>畫線磁吸（對齊 K 棒高低點）</span>
+        <input type="checkbox" id="setMagnet">
+      </label>
+      <div class="row"><span>清除本商品所有畫線</span><button class="btn" id="clearDrawings">清除</button></div>
+      <div class="row"><span>通知權限（價格警示）</span><button class="btn" id="askNotify">開啟通知</button></div>
+      <p class="fine">行情資料來源：Binance 公開市場資料。圖表引擎：<a href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener" style="color:inherit">TradingView Lightweight Charts™</a>（Apache-2.0）。本 App 僅供看盤參考，不構成投資建議。</p>
+    </div>
+  </div>
+</div>
+
+<!-- Text input -->
+<div class="modal" id="textModal" hidden>
+  <div class="modal-card small">
+    <div class="modal-head"><h3>輸入文字</h3><button class="icon-btn" data-close title="關閉">✕</button></div>
+    <form id="textForm" class="text-form">
+      <input id="textInput" maxlength="80" placeholder="標註文字" autocomplete="off">
+      <button class="btn primary" type="submit">確定</button>
+    </form>
+  </div>
+</div>
+
+<!-- iOS install help -->
+<div class="modal" id="iosModal" hidden>
+  <div class="modal-card small">
+    <div class="modal-head"><h3>安裝到主畫面</h3><button class="icon-btn" data-close title="關閉">✕</button></div>
+    <ol class="ios-steps">
+      <li>用 Safari 開啟本頁</li>
+      <li>點下方的「分享」按鈕 <span class="kbd">⬆︎</span></li>
+      <li>選「加入主畫面」，之後就能像 App 一樣從桌面開啟</li>
+    </ol>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
