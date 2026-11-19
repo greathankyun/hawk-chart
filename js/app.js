@@ -1,6 +1,7 @@
 import * as I from './indicators.js';
-import { INTERVALS, intervalSec, fetchKlines, fetchAllTickers, fetchTicker, Stream, splitSymbol, QUOTES } from './data.js';
+import { INTERVALS, intervalSec, fetchKlines, fetchAllTickers, fetchTicker, splitSymbol, isCrypto, symbolMeta, fetchQuotes, subscribeKlines, subscribeTickers, toSym } from './data.js';
 import * as D from './data.js';
+import { CATALOG, SEED_WATCH } from './markets.js';
 import { Drawings, TOOLS, COLORS } from './drawings.js';
 
 const LC = window.LightweightCharts;
@@ -19,6 +20,8 @@ const DEFAULTS = {
 let S;
 try { S = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('hawk.state') || '{}') }; } catch { S = { ...DEFAULTS }; }
 S.settings = { ...DEFAULTS.settings, ...S.settings };
+// one-time: add Taiwan / US / index / commodity / FX examples to existing watchlists
+if (!S.mktSeeded) { S.watchlist = [...S.watchlist, ...SEED_WATCH.filter(s => !S.watchlist.includes(s))]; S.mktSeeded = true; }
 const save = () => { try { localStorage.setItem('hawk.state', JSON.stringify(S)); } catch {} };
 
 // ---------- runtime ----------
@@ -47,6 +50,11 @@ function decimals(p) {
   if (p >= 0.001) return 6;
   return 8;
 }
+// FX needs more digits than its price level suggests (EUR/USD 1.0845)
+function decFor(sym, p) {
+  if (!isCrypto(sym) && symbolMeta(sym).cat === 'fx') { p = Math.abs(p || 0); return p < 20 ? 4 : p < 200 ? 3 : 2; }
+  return decimals(p);
+}
 let priceDec = 2;
 const fmt = p => (p == null || isNaN(p) ? '—' : (+p).toLocaleString('en-US', { minimumFractionDigits: priceDec, maximumFractionDigits: priceDec }));
 const fmtP = (p, d) => (p == null ? '—' : (+p).toLocaleString('en-US', { minimumFractionDigits: d ?? decimals(p), maximumFractionDigits: d ?? decimals(p) }));
@@ -60,7 +68,9 @@ function fmtBig(v) {
 }
 const pct = v => (v == null || isNaN(v) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%');
 const cls = v => (v > 0 ? 'up' : v < 0 ? 'down' : '');
-const symLabel = s => { const [b, q] = splitSymbol(s); return q ? `${b}/${q}` : s; };
+const symLabel = s => symbolMeta(s).label;
+const fmtS = (sym, p) => (p == null || isNaN(p) ? '—' : fmtP(p, decFor(sym, p)));
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function toast(msg, ms = 3500) { const t = el('div', 'toast', msg); $('#toasts').append(t); setTimeout(() => t.remove(), ms); }
 function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
@@ -248,7 +258,7 @@ function updateLegend(idx) {
   const chgPct = prev ? (chg / prev.close) * 100 : 0;
   const c = cls(chg);
   const iv = INTERVALS.find(x => x.k === S.interval);
-  let html = `<div class="l-main"><span class="l-sym">${symLabel(S.symbol)}</span><span class="l-tag">${iv.label} · Binance</span>
+  let html = `<div class="l-main"><span class="l-sym">${symLabel(S.symbol)}</span><span class="l-tag">${iv.label} · ${esc(srcLabel(S.symbol))}</span>
     <span><span class="l-k">開</span><span class="${c}">${fmt(b.open)}</span></span>
     <span><span class="l-k">高</span><span class="${c}">${fmt(b.high)}</span></span>
     <span><span class="l-k">低</span><span class="${c}">${fmt(b.low)}</span></span>
@@ -294,15 +304,15 @@ async function loadSymbol() {
     if (ctl.signal.aborted) return;
     const intraday = intervalSec(S.interval) < 86400;
     bars = rows.map(r => ({ ...r, intraday }));
-    if (bars.length) priceDec = decimals(bars[bars.length - 1].close);
+    if (bars.length) priceDec = decFor(S.symbol, bars[bars.length - 1].close);
     if (bars.length < 1000) exhausted = true;
     buildSeries();
-    $('#demoBadge').hidden = !D.demoMode;
-    klineStream = new Stream([`${S.symbol.toLowerCase()}@kline_${S.interval}`], onKline, st => setStatus(st));
+    updateDemoBadge();
+    klineStream = subscribeKlines(S.symbol, S.interval, onKline, st => setStatus(st));
     const tk = await fetchTicker(S.symbol);
     if (tk) { tickers[S.symbol] = { ...tickers[S.symbol], ...tk }; renderHeader(); renderDetail(); }
   } catch (e) {
-    if (e.name !== 'AbortError') toast('載入失敗：' + e.message);
+    if (e.name !== 'AbortError') { toast('載入失敗：' + e.message); bars = []; buildSeries(); }
   } finally {
     if (loadCtl === ctl) $('#loading').classList.remove('on');
   }
@@ -324,10 +334,9 @@ async function loadMore() {
   } catch {} finally { loadingMore = false; }
 }
 
-function onKline(stream, data) {
-  const k = data.k;
-  if (!k || !bars.length) return;
-  const bar = { utc: Math.floor(k.t / 1000), open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v, quoteVolume: +k.q, intraday: bars[0].intraday };
+function onKline(b) {
+  if (!b || !bars.length) return;
+  const bar = { ...b, intraday: bars[0].intraday };
   const last = bars[bars.length - 1];
   if (bar.utc === last.utc) bars[bars.length - 1] = bar;
   else if (bar.utc > last.utc) bars.push(bar);
@@ -337,8 +346,10 @@ function onKline(stream, data) {
 }
 
 function setStatus(st) {
-  const map = { live: '● 即時', reconnecting: '○ 重新連線中…', demo: '● 模擬' };
+  const delay = symbolMeta(S.symbol).delay;
+  const map = { live: '● 即時', delayed: `● 延遲約 ${delay} 分`, reconnecting: '○ 重新連線中…', demo: '● 模擬' };
   $('#statusBadge').textContent = map[st] || '';
+  if (st === 'delayed') { $('#statusBadge').style.color = css('--muted'); return; }
   $('#statusBadge').style.color = st === 'live' ? css('--down') : css('--muted');
   if (st === 'live' && S.settings.colors === 'tw') $('#statusBadge').style.color = '#10b981';
 }
@@ -348,12 +359,19 @@ function renderHeader() {
   const t = tickers[S.symbol];
   $('#symName').textContent = symLabel(S.symbol);
   const last = t?.last ?? bars[bars.length - 1]?.close;
-  $('#symPrice').textContent = last != null ? fmtP(last, decimals(last)) : '—';
+  $('#symPrice').textContent = last != null ? fmtS(S.symbol, last) : '—';
   $('#symChg').textContent = t ? pct(t.chgPct) : '';
   $('#symChg').className = 'sym-chg ' + cls(t?.chgPct);
   $('#symPrice').className = 'sym-price ' + cls(t?.chgPct);
 }
+function srcLabel(sym) {
+  const m = symbolMeta(sym);
+  if (m.crypto) return 'Binance';
+  if (D.isDemo(sym)) return '模擬';
+  return m.source === 'Fugle' ? '富果即時' : m.delay ? `Yahoo · 延遲 ${m.delay} 分` : 'Yahoo';
+}
 function renderDetail() {
+  if (!isCrypto(S.symbol)) return renderMarketDetail();
   const t = tickers[S.symbol];
   const [base, quote] = splitSymbol(S.symbol);
   if (!t) { $('#detail').innerHTML = `<div class="d-name">${base} / ${quote}</div>`; return; }
@@ -371,17 +389,46 @@ function renderDetail() {
     </dl>`;
 }
 
+function renderMarketDetail() {
+  const sym = S.symbol, t = tickers[sym], m = symbolMeta(sym);
+  const head = `<div class="d-name">${esc(m.label)} · ${m.catName}${m.exchange ? ' · ' + esc(m.exchange) : ''}</div>`;
+  if (!t) {
+    $('#detail').innerHTML = head + (D.getWorkerUrl() ? '' : `<p class="d-hint">要看即時價格，請到「設定 → 行情中繼」填入網址。</p>`);
+    return;
+  }
+  const hasRange = t.high != null && t.low != null && t.high > t.low;
+  const pos = hasRange ? ((t.last - t.low) / (t.high - t.low)) * 100 : 50;
+  $('#detail').innerHTML = head + `
+    <div class="d-top"><span class="d-px ${cls(t.chgPct)}">${fmtS(sym, t.last)}</span>
+      <span class="${cls(t.chgPct)}">${t.chg != null ? (t.chg >= 0 ? '+' : '') + fmtS(sym, t.chg) : ''} (${pct(t.chgPct)})</span></div>
+    ${hasRange ? `<div class="range-bar"><i style="left:calc(${pos.toFixed(1)}% - 1px)"></i></div>
+    <div class="range-lbl"><span>今日低 ${fmtS(sym, t.low)}</span><span>今日高 ${fmtS(sym, t.high)}</span></div>` : ''}
+    <dl>
+      ${t.prevClose != null ? `<dt>昨收</dt><dd>${fmtS(sym, t.prevClose)}</dd>` : ''}
+      ${t.open != null ? `<dt>今開</dt><dd>${fmtS(sym, t.open)}</dd>` : ''}
+      ${t.vol ? `<dt>成交量</dt><dd>${m.cat === 'tw' ? fmtBig(t.vol / 1000) + ' 張' : fmtBig(t.vol)}</dd>` : ''}
+      ${t.currency || m.currency ? `<dt>幣別</dt><dd>${esc(t.currency || m.currency)}</dd>` : ''}
+      <dt>資料來源</dt><dd>${esc(srcLabel(sym))}</dd>
+      ${t.time ? `<dt>更新時間</dt><dd>${new Date(t.time * 1000).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</dd>` : ''}
+    </dl>`;
+}
+function updateDemoBadge() {
+  const r = D.demoReason(S.symbol);
+  $('#demoBadge').textContent = r;
+  $('#demoBadge').hidden = !r;
+}
+
 // ---------- watchlist ----------
 function renderWatchlist() {
   const ul = $('#watchlist');
   ul.innerHTML = '';
   for (const sym of S.watchlist) {
     const t = tickers[sym];
-    const [b, q] = splitSymbol(sym);
+    const m = symbolMeta(sym);
     const li = el('li', sym === S.symbol ? 'on' : '');
     li.dataset.sym = sym;
-    li.innerHTML = `<span class="w-sym">${b}<small>/${q}</small></span>
-      <span class="w-px ${cls(t?.chgPct)}">${t ? fmtP(t.last) : '—'}</span>
+    li.innerHTML = `<span class="w-sym" title="${esc(m.label)}">${esc(m.title)}<small>${m.crypto ? esc(m.sub) : ' ' + esc(m.sub)}</small></span>
+      <span class="w-px ${cls(t?.chgPct)}">${t ? fmtS(sym, t.last) : '—'}</span>
       <span class="w-chg ${cls(t?.chgPct)}">${t ? pct(t.chgPct) : ''}</span>
       <button class="w-del" title="移除" aria-label="移除">✕</button>`;
     li.onclick = e => {
@@ -393,30 +440,30 @@ function renderWatchlist() {
   }
 }
 function updateWatchRow(sym, prevLast) {
-  const li = $(`#watchlist li[data-sym="${sym}"]`);
+  const li = $(`#watchlist li[data-sym="${CSS.escape(sym)}"]`);
   if (!li) return;
   const t = tickers[sym];
   const px = li.querySelector('.w-px'), ch = li.querySelector('.w-chg');
-  px.textContent = fmtP(t.last);
+  px.textContent = fmtS(sym, t.last);
   px.className = 'w-px ' + cls(t.chgPct) + (prevLast != null && t.last !== prevLast ? (t.last > prevLast ? ' flash-up' : ' flash-down') : '');
   ch.textContent = pct(t.chgPct); ch.className = 'w-chg ' + cls(t.chgPct);
 }
 function restartWatchStream() {
   wlStream?.close();
   const syms = [...new Set([...S.watchlist, S.symbol])];
-  wlStream = new Stream(syms.map(s => s.toLowerCase() + '@miniTicker'), (st, d) => {
-    const sym = d.s;
+  wlStream = subscribeTickers(syms, t => {
+    const sym = t.symbol;
     const prev = tickers[sym]?.last;
-    const last = +d.c, open = +d.o;
-    tickers[sym] = { ...tickers[sym], symbol: sym, last, open, chg: last - open, chgPct: open ? (last / open - 1) * 100 : 0, high: +d.h, low: +d.l, vol: +d.v, qvol: +d.q };
+    tickers[sym] = { ...tickers[sym], ...t };
     updateWatchRow(sym, prev);
     if (sym === S.symbol) { renderHeader(); renderDetail(); }
-    priceUpdate(sym, last);
+    priceUpdate(sym, t.last);
   });
 }
 async function primeTickers() {
-  const all = await fetchAllTickers();
-  for (const t of all) if (S.watchlist.includes(t.symbol) || t.symbol === S.symbol) tickers[t.symbol] = { ...tickers[t.symbol], ...t };
+  const want = [...new Set([...S.watchlist, S.symbol])];
+  const [all, mk] = await Promise.all([want.some(isCrypto) ? fetchAllTickers() : [], fetchQuotes(want)]);
+  for (const t of [...all, ...mk]) if (want.includes(t.symbol)) tickers[t.symbol] = { ...tickers[t.symbol], ...t };
   renderWatchlist(); renderHeader(); renderDetail();
 }
 
@@ -440,7 +487,7 @@ function priceUpdate(sym, price) {
     if (a.fired || a.symbol !== sym) continue;
     if ((a.dir === 'above' && prev < a.price && price >= a.price) || (a.dir === 'below' && prev > a.price && price <= a.price)) {
       a.fired = true; changed = true;
-      const msg = `${symLabel(sym)} ${a.dir === 'above' ? '漲破' : '跌破'} ${fmtP(a.price)}（現價 ${fmtP(price)}）`;
+      const msg = `${symLabel(sym)} ${a.dir === 'above' ? '漲破' : '跌破'} ${fmtS(sym, a.price)}（現價 ${fmtS(sym, price)}）`;
       toast('🔔 ' + msg, 8000);
       notify('鷹眼看盤 價格警示', msg);
     }
@@ -462,7 +509,7 @@ function renderAlerts() {
   if (!list.length) { ul.append(el('li', 'empty', `${symLabel(S.symbol)} 尚無警示`)); return; }
   for (const a of list) {
     const li = el('li', a.fired ? 'fired' : '');
-    li.innerHTML = `<span class="a-txt">${a.dir === 'above' ? '漲破' : '跌破'} <b>${fmtP(a.price)}</b></span><button class="icon-btn danger" title="刪除">✕</button>`;
+    li.innerHTML = `<span class="a-txt">${a.dir === 'above' ? '漲破' : '跌破'} <b>${fmtS(S.symbol, a.price)}</b></span><button class="icon-btn danger" title="刪除">✕</button>`;
     li.querySelector('button').onclick = () => { S.alerts = S.alerts.filter(x => x !== a); save(); renderAlerts(); drawAlertLines(); };
     ul.append(li);
   }
@@ -481,74 +528,153 @@ $('#alertForm').onsubmit = e => {
   save(); renderAlerts(); drawAlertLines();
   $('#alertPrice').value = '';
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
-  toast(`已新增警示：${symLabel(S.symbol)} ${$('#alertDir').value === 'above' ? '漲破' : '跌破'} ${fmtP(price)}`);
+  toast(`已新增警示：${symLabel(S.symbol)} ${$('#alertDir').value === 'above' ? '漲破' : '跌破'} ${fmtS(S.symbol, price)}`);
 };
 $('#alertPrice').addEventListener('focus', () => {
   const last = bars[bars.length - 1]?.close;
-  if (!$('#alertPrice').value && last) $('#alertPrice').placeholder = fmtP(last).replace(/,/g, '');
+  if (!$('#alertPrice').value && last) $('#alertPrice').placeholder = fmtS(S.symbol, last).replace(/,/g, '');
 });
 
 // ---------- symbol search ----------
-let symAll = [], quoteTab = 'USDT', kbIdx = 0, symShown = [];
+const MKT_TABS = [['fav', '★ 自選'], ['all', '全部'], ['crypto', '加密貨幣'], ['tw', '台股'], ['us', '美股'], ['idx', '指數'], ['cmd', '原物料'], ['fx', '外匯']];
+const CRYPTO_QUOTES = ['USDT', 'FDUSD', 'USDC', 'BTC', 'ETH', 'BNB', '全部'];
+let symAll = [], mktTab = 'crypto', quoteTab = 'USDT', kbIdx = 0, symShown = [], remoteSyms = [], remoteQ = '', remoteTimer = null, remoteCtl = null, twAll = [];
 function openModal(id) { $(id).hidden = false; }
 function closeModals() { document.querySelectorAll('.modal').forEach(m => (m.hidden = true)); }
 document.querySelectorAll('.modal').forEach(m => m.addEventListener('pointerdown', e => { if (e.target === m || e.target.closest('[data-close]')) closeModals(); }));
 
-async function openSearch(prefill = '') {
+async function openSearch(prefill = '', tab) {
+  if (tab) mktTab = tab;
   openModal('#symModal');
   const inp = $('#symSearch');
   inp.value = prefill;
   setTimeout(() => inp.focus(), 30);
+  remoteSyms = []; remoteQ = '';
+  renderQuoteTabs();
   $('#symList').innerHTML = '<li class="empty">載入中…</li>';
   symAll = await fetchAllTickers();
-  renderQuoteTabs();
+  if (D.getWorkerUrl() && !twAll.length) D.loadTwList().then(l => { twAll = l; if (!$('#symModal').hidden) renderSymList(); });
   renderSymList();
 }
 function renderQuoteTabs() {
   const tabs = $('#quoteTabs');
   tabs.innerHTML = '';
-  for (const q of ['★ 自選', 'USDT', 'FDUSD', 'USDC', 'BTC', 'ETH', 'BNB', '全部']) {
-    const b = el('button', q === quoteTab ? 'on' : '', q);
-    b.onclick = () => { quoteTab = q; renderQuoteTabs(); renderSymList(); };
+  for (const [k, name] of MKT_TABS) {
+    const b = el('button', k === mktTab ? 'on' : '', name);
+    b.onclick = () => { mktTab = k; renderQuoteTabs(); renderSymList(); $('#symSearch').focus(); };
     tabs.append(b);
   }
+  const sub = $('#quoteSub');
+  sub.innerHTML = '';
+  sub.hidden = mktTab !== 'crypto';
+  if (mktTab === 'crypto') for (const q of CRYPTO_QUOTES) {
+    const b = el('button', q === quoteTab ? 'on' : '', q);
+    b.onclick = () => { quoteTab = q; renderQuoteTabs(); renderSymList(); };
+    sub.append(b);
+  }
+  $('#symVolHead').textContent = mktTab === 'crypto' ? '24h 成交額' : '成交量';
+}
+// rows: { symbol, t (ticker or undefined), score }
+function marketRows(cat, q, raw) {
+  const out = [];
+  const match = (code, name) => !q || code.toUpperCase().replace(/[\/\s.-]/g, '').includes(q) || (name && name.includes(raw));
+  for (const x of CATALOG) if ((cat === 'all' || x.cat === cat) && match(x.code, x.name)) out.push(toSym(x.code));
+  if (q && (cat === 'all' || cat === 'tw')) {
+    for (const [code, name, mk] of twAll) {
+      if (out.length > 300) break;
+      if (code.startsWith(q) || name.includes(raw)) out.push(toSym(`${code}.${mk}`));
+    }
+    // a bare Taiwan code typed without the worker's list: offer it directly
+    if (/^\d{4,6}[A-Z]?$/.test(q) && !twAll.length) out.push(toSym(q + '.TW'));
+  }
+  if (q && remoteQ === raw) for (const s of remoteSyms) if (cat === 'all' || symbolMeta(s).cat === cat) out.push(s);
+  return out;
 }
 function renderSymList() {
-  const q = $('#symSearch').value.trim().toUpperCase().replace(/[\/\s-]/g, '');
-  let list = symAll;
-  if (quoteTab === '★ 自選') list = list.filter(t => S.watchlist.includes(t.symbol));
-  else if (quoteTab !== '全部') list = list.filter(t => splitSymbol(t.symbol)[1] === quoteTab);
-  if (q) {
-    list = list.filter(t => t.symbol.includes(q));
-    list = list.slice().sort((a, b) => (b.symbol.startsWith(q) - a.symbol.startsWith(q)) || b.qvol - a.qvol);
-  } else list = list.slice().sort((a, b) => b.qvol - a.qvol);
-  symShown = list.slice(0, 200);
+  const raw = $('#symSearch').value.trim();
+  const q = raw.toUpperCase().replace(/[\/\s-]/g, '');
+  let list = [];
+  const cryptoRows = filter => {
+    let l = symAll.filter(filter);
+    if (q) l = l.filter(t => t.symbol.includes(q)).sort((a, b) => (b.symbol.startsWith(q) - a.symbol.startsWith(q)) || b.qvol - a.qvol);
+    else l = l.slice().sort((a, b) => b.qvol - a.qvol);
+    return l.map(t => t.symbol);
+  };
+  if (mktTab === 'fav') list = S.watchlist.filter(s => !q || s.toUpperCase().includes(q) || symbolMeta(s).label.includes(raw));
+  else if (mktTab === 'crypto') list = cryptoRows(t => quoteTab === '全部' || splitSymbol(t.symbol)[1] === quoteTab);
+  else if (mktTab === 'all') list = q ? [...marketRows('all', q, raw).slice(0, 60), ...cryptoRows(() => true).slice(0, 100)] : [...cryptoRows(t => splitSymbol(t.symbol)[1] === 'USDT').slice(0, 20), ...marketRows('all', '', '')];
+  else list = marketRows(mktTab, q, raw);
+  list = [...new Set(list)];
+  if (q && mktTab !== 'crypto' && mktTab !== 'fav' && D.getWorkerUrl() && remoteQ !== raw) queueRemote(raw);
+  const byCrypto = Object.fromEntries(symAll.map(t => [t.symbol, t]));
+  symShown = list.slice(0, 200).map(s => ({ symbol: s, t: isCrypto(s) ? byCrypto[s] || tickers[s] : tickers[s] }));
   kbIdx = 0;
   const ul = $('#symList');
   ul.innerHTML = '';
-  if (!symShown.length) { ul.append(el('li', 'empty', '找不到符合的商品')); return; }
-  symShown.forEach((t, i) => {
-    const [b, qq] = splitSymbol(t.symbol);
-    const on = S.watchlist.includes(t.symbol);
+  if (!['crypto', 'fav', 'all'].includes(mktTab) && !D.getWorkerUrl()) {
+    const tip = el('li', 'empty tip', '台股、美股、指數、原物料、外匯的報價需要「行情中繼」。<button class="btn">前往設定</button>');
+    tip.querySelector('button').onclick = () => { closeModals(); openSettings(); };
+    ul.append(tip);
+  }
+  if (!symShown.length) { ul.append(el('li', 'empty', raw && D.getWorkerUrl() && remoteQ !== raw ? '搜尋中…' : '找不到符合的商品')); return; }
+  symShown.forEach((row, i) => {
+    const { symbol: s, t } = row;
+    const m = symbolMeta(s);
+    const on = S.watchlist.includes(s);
     const li = el('li', i === 0 ? 'kb' : '');
-    li.innerHTML = `<span class="s-sym"><b>${b}</b><small>/${qq}</small></span><span>${fmtP(t.last)}</span><span class="${cls(t.chgPct)}">${pct(t.chgPct)}</span><span>${fmtBig(t.qvol)}</span>
+    li.dataset.sym = s;
+    const tag = mktTab === 'all' || mktTab === 'fav' ? `<em class="s-tag">${m.catName}</em>` : '';
+    li.innerHTML = `<span class="s-sym"><b>${esc(m.title)}</b><small>${m.crypto ? esc(m.sub) : ' ' + esc(m.sub)}</small>${tag}</span><span class="s-px">${t ? fmtS(s, t.last) : '—'}</span><span class="s-chg ${cls(t?.chgPct)}">${t ? pct(t.chgPct) : ''}</span><span class="s-vol">${t ? fmtBig(m.crypto ? t.qvol : t.vol) : ''}</span>
       <button class="star ${on ? 'on' : ''}" title="${on ? '移出自選' : '加入自選'}">${on ? '★' : '☆'}</button>`;
     li.onclick = e => {
       if (e.target.closest('.star')) {
-        const s = t.symbol;
         S.watchlist = S.watchlist.includes(s) ? S.watchlist.filter(x => x !== s) : [...S.watchlist, s];
         save();
-        if (!tickers[s]) tickers[s] = t;
+        if (!tickers[s] && t) tickers[s] = t;
         renderWatchlist(); restartWatchStream();
         const st = e.target.closest('.star'); const now = S.watchlist.includes(s);
         st.className = 'star' + (now ? ' on' : ''); st.textContent = now ? '★' : '☆';
         return;
       }
-      tickers[t.symbol] = { ...tickers[t.symbol], ...t };
-      closeModals(); switchSymbol(t.symbol);
+      pickSymbol(row);
     };
     ul.append(li);
   });
+  fillQuotes(symShown.map(r => r.symbol).filter(s => !isCrypto(s) && !tickers[s]).slice(0, 45));
+}
+function pickSymbol({ symbol, t }) {
+  if (t) tickers[symbol] = { ...tickers[symbol], ...t };
+  closeModals(); switchSymbol(symbol);
+}
+let fillGen = 0;
+async function fillQuotes(syms) {
+  if (!syms.length || !D.getWorkerUrl()) return;
+  const gen = ++fillGen;
+  const qs = await fetchQuotes(syms);
+  if (gen !== fillGen) return;
+  for (const t of qs) {
+    tickers[t.symbol] = { ...tickers[t.symbol], ...t };
+    const li = $(`#symList li[data-sym="${CSS.escape(t.symbol)}"]`);
+    if (!li) continue;
+    const row = symShown.find(r => r.symbol === t.symbol); if (row) row.t = tickers[t.symbol];
+    const m = symbolMeta(t.symbol);
+    li.querySelector('.s-sym b').textContent = m.title;
+    li.querySelector('.s-sym small').textContent = ' ' + m.sub;
+    li.querySelector('.s-px').textContent = fmtS(t.symbol, t.last);
+    const c = li.querySelector('.s-chg'); c.textContent = pct(t.chgPct); c.className = 's-chg ' + cls(t.chgPct);
+    li.querySelector('.s-vol').textContent = t.vol ? fmtBig(t.vol) : '';
+  }
+}
+function queueRemote(raw) {
+  clearTimeout(remoteTimer);
+  remoteTimer = setTimeout(async () => {
+    remoteCtl?.abort();
+    const ctl = remoteCtl = new AbortController();
+    const res = await D.searchMarkets(raw, { signal: ctl.signal });
+    if (ctl.signal.aborted || $('#symSearch').value.trim() !== raw) return;
+    remoteSyms = res; remoteQ = raw;
+    renderSymList();
+  }, 350);
 }
 $('#symSearch').addEventListener('input', renderSymList);
 $('#symSearch').addEventListener('keydown', e => {
@@ -559,11 +685,11 @@ $('#symSearch').addEventListener('keydown', e => {
     kbIdx = Math.max(0, Math.min(items.length - 1, kbIdx + (e.key === 'ArrowDown' ? 1 : -1)));
     items[kbIdx]?.classList.add('kb'); items[kbIdx]?.scrollIntoView({ block: 'nearest' });
   } else if (e.key === 'Enter' && symShown[kbIdx]) {
-    const t = symShown[kbIdx]; tickers[t.symbol] = { ...tickers[t.symbol], ...t }; closeModals(); switchSymbol(t.symbol);
+    pickSymbol(symShown[kbIdx]);
   }
 });
 $('#symBtn').onclick = () => openSearch();
-$('#addWatch').onclick = () => { quoteTab = 'USDT'; openSearch(); };
+$('#addWatch').onclick = () => openSearch('', 'all');
 
 // ---------- indicators UI ----------
 function renderIndModal() {
@@ -605,10 +731,39 @@ function renderIndModal() {
 $('#indBtn').onclick = () => { renderIndModal(); openModal('#indModal'); };
 
 // ---------- settings ----------
-$('#setBtn').onclick = () => {
+function openSettings() {
   $('#setColor').value = S.settings.colors; $('#setTheme').value = S.settings.theme; $('#setTz').value = S.settings.tz; $('#setMagnet').checked = S.settings.magnet;
   $('#askNotify').textContent = !('Notification' in window) ? '此裝置不支援' : Notification.permission === 'granted' ? '已開啟' : '開啟通知';
+  $('#setWorker').value = D.getWorkerUrl();
+  showWorkerStatus();
   openModal('#setModal');
+}
+$('#setBtn').onclick = () => openSettings();
+async function showWorkerStatus(url = D.getWorkerUrl()) {
+  const st = $('#workerStatus');
+  if (!url) { st.textContent = '未設定：台股、美股、指數、原物料、外匯會顯示模擬資料。'; st.className = 'fine'; return; }
+  st.textContent = '連線測試中…'; st.className = 'fine';
+  try {
+    const h = await D.testWorker(url);
+    st.textContent = `✓ 已連線（Yahoo 行情${h.providers?.fugle ? '＋富果台股即時' : '；台股延遲約 20 分，可加富果金鑰升級即時'}）`;
+    st.className = 'fine ok';
+  } catch (e) {
+    st.textContent = '✗ 連不上這個網址（' + e.message + '），請確認網址是否正確、Worker 是否已部署。';
+    st.className = 'fine bad';
+  }
+}
+$('#saveWorker').onclick = async () => {
+  const before = D.getWorkerUrl();
+  const u = D.setWorkerUrl($('#setWorker').value);
+  $('#setWorker').value = u;
+  await showWorkerStatus(u);
+  if (u !== before) {
+    for (const k of Object.keys(tickers)) if (!isCrypto(k)) delete tickers[k];
+    D.loadTwList();
+    primeTickers(); restartWatchStream();
+    if (!isCrypto(S.symbol)) loadSymbol();
+    toast(u ? '已儲存行情中繼網址' : '已清除行情中繼網址');
+  }
 };
 // chart type selector inside settings for small screens
 (() => {
@@ -716,7 +871,7 @@ $('#shotBtn').onclick = () => {
   ctx.font = `${12 * dpr}px sans-serif`; ctx.fillStyle = css('--muted');
   ctx.fillText(`${symLabel(S.symbol)} · ${INTERVALS.find(i => i.k === S.interval).label} · 鷹眼看盤 · ${new Date().toLocaleString('zh-TW')}`, 10 * dpr, c.height - 10 * dpr);
   c.toBlob(async b => {
-    const name = `${S.symbol}_${S.interval}_${Date.now()}.png`;
+    const name = `${S.symbol.replace(/[^\w.-]+/g, '_')}_${S.interval}_${Date.now()}.png`;
     // phones (esp. installed iOS apps) can't download files: use the share sheet so it can be saved to Photos
     const file = new File([b], name, { type: 'image/png' });
     if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
@@ -747,7 +902,7 @@ document.addEventListener('keydown', e => {
     if (k) { e.preventDefault(); drawings.setTool(k); renderDrawbar(); }
     return;
   }
-  if (!e.ctrlKey && !e.metaKey && /^[a-z0-9]$/i.test(e.key)) { e.preventDefault(); openSearch(e.key.toUpperCase()); }
+  if (!e.ctrlKey && !e.metaKey && /^[a-z0-9]$/i.test(e.key)) { e.preventDefault(); openSearch(e.key.toUpperCase(), 'all'); }
 });
 
 // ---------- install (PWA) ----------
@@ -775,6 +930,7 @@ drawings = new Drawings({
 });
 drawings.magnet = S.settings.magnet;
 renderTimeframes(); renderTypes(); renderDrawbar(); renderWatchlist(); renderAlerts();
-loadSymbol().then(() => { primeTickers(); restartWatchStream(); $('#demoBadge').hidden = !D.demoMode; });
-window.addEventListener('online', () => { if (D.demoMode) toast('網路已恢復，重新整理即可取得即時行情'); });
+loadSymbol().then(() => { primeTickers(); restartWatchStream(); updateDemoBadge(); });
+if (D.getWorkerUrl()) D.loadTwList();
+window.addEventListener('online', () => { if (D.isDemo(S.symbol)) toast('網路已恢復，重新整理即可取得即時行情'); });
 window.__hawk = { S, get bars() { return bars; }, drawings, get chart() { return chart; } };

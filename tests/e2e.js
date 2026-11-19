@@ -109,7 +109,7 @@ await p.keyboard.press('Escape');ok(await p.isHidden('#indModal'),'esc closes mo
 await p.click('#symBtn');await p.waitForSelector('#symList li:not(.empty)');
 await p.fill('#symSearch','eth');await p.waitForTimeout(100);
 const first=await p.textContent('#symList li >> nth=0'); ok(/ETH/.test(first),'search eth');
-await p.click('#quoteTabs button:text-is("BTC")');ok(/BTC/.test(await p.textContent('#symList li >> nth=0')),'quote tab BTC');
+await p.click('#quoteSub button:text-is("BTC")');ok(/BTC/.test(await p.textContent('#symList li >> nth=0')),'quote tab BTC');
 await p.click('#quoteTabs button:text-is("全部")');
 await p.press('#symSearch','ArrowDown');await p.press('#symSearch','Enter');await p.waitForTimeout(500);
 const sym=await p.evaluate(()=>window.__hawk.S.symbol); ok(sym!=='BTCUSDT','switched via keyboard '+sym);

@@ -297,3 +297,17 @@ button { cursor: pointer; }
   .modal { padding-top: calc(4vh + var(--safe-t)); }
   .modal-card { max-height: 88vh; }
 }
+
+/* ---- multi-market ---- */
+.quote-tabs.sub { padding-top: 2px; }
+.quote-tabs.sub button { font-size: 11px; padding: 2px 8px; }
+.sym-list .s-sym { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sym-list .s-tag { font-style: normal; font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; }
+.sym-list .empty.tip { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding: 12px; font-size: 12px; }
+.set-body .row.col { flex-direction: column; align-items: stretch; gap: 8px; }
+.worker-row { display: flex; gap: 8px; }
+.worker-row input { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: inherit; font-size: 13px; }
+.fine.ok { color: #10b981; }
+.fine.bad { color: #ef4444; }
+.set-body .row.col .fine { margin: 0; }
+.d-hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }

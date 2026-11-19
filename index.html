@@ -107,11 +107,12 @@
 <div class="modal" id="symModal" hidden>
   <div class="modal-card wide">
     <div class="modal-head">
-      <input id="symSearch" type="search" placeholder="搜尋商品，例如 BTC、ETH、SOL" autocomplete="off" spellcheck="false">
+      <input id="symSearch" type="search" placeholder="搜尋商品，例如 BTC、2330、台積電、AAPL、黃金" autocomplete="off" spellcheck="false">
       <button class="icon-btn" data-close title="關閉">✕</button>
     </div>
     <div class="quote-tabs" id="quoteTabs"></div>
-    <div class="sym-list-head"><span>商品</span><span>最新價</span><span>24h 漲跌</span><span>24h 成交額</span><span></span></div>
+    <div class="quote-tabs sub" id="quoteSub" hidden></div>
+    <div class="sym-list-head"><span>商品</span><span>最新價</span><span>漲跌</span><span id="symVolHead">24h 成交額</span><span></span></div>
     <ul class="sym-list" id="symList"></ul>
   </div>
 </div>
@@ -161,9 +162,16 @@
       <label class="row"><span>畫線磁吸（對齊 K 棒高低點）</span>
         <input type="checkbox" id="setMagnet">
       </label>
+      <div class="row col"><span>行情中繼（台股、美股、指數、原物料、外匯）</span>
+        <div class="worker-row">
+          <input id="setWorker" type="url" inputmode="url" placeholder="https://hawk-chart.xxx.workers.dev" autocomplete="off" spellcheck="false">
+          <button class="btn primary" id="saveWorker" type="button">儲存</button>
+        </div>
+        <p class="fine" id="workerStatus"></p>
+      </div>
       <div class="row"><span>清除本商品所有畫線</span><button class="btn" id="clearDrawings">清除</button></div>
       <div class="row"><span>通知權限（價格警示）</span><button class="btn" id="askNotify">開啟通知</button></div>
-      <p class="fine">行情資料來源：Binance 公開市場資料。圖表引擎：<a href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener" style="color:inherit">TradingView Lightweight Charts™</a>（Apache-2.0）。本 App 僅供看盤參考，不構成投資建議。</p>
+      <p class="fine">行情資料來源：加密貨幣為 Binance 公開市場資料；台股、美股、指數、原物料、外匯經由自架行情中繼取得 Yahoo Finance 資料（台股可選用富果即時行情），部分市場有延遲。圖表引擎：<a href="https://www.tradingview.com/lightweight-charts/" target="_blank" rel="noopener" style="color:inherit">TradingView Lightweight Charts™</a>（Apache-2.0）。本 App 僅供看盤參考，不構成投資建議。</p>
     </div>
   </div>
 </div>
