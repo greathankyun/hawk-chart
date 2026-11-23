@@ -202,7 +202,7 @@ export function initBacktest(app) {
         <div><small>平均持有</small><b>${s.avgBars.toFixed(1)} 根</b></div>
         <div><small>持倉時間</small><b>${s.exposure.toFixed(1)}%</b></div>
       </div>
-      <div class="eq-wrap"><div class="eq-title">資金曲線 <span class="muted">（橘：策略／灰：買進持有）</span></div><div class="eq-chart" id="eqChart"></div></div>
+      <div class="eq-wrap"><div class="eq-title">資金曲線 <span class="muted">（青：策略／灰：買進持有）</span></div><div class="eq-chart" id="eqChart"></div></div>
       <div class="bt-actions"><button class="btn" data-a="mk">在主圖標示交易</button><button class="btn" data-a="clr">清除標示</button><button class="btn" data-a="csv">匯出交易明細 CSV</button></div>
       <div class="trade-table"><table><thead><tr><th>#</th><th>方向</th><th>進場時間</th><th>進場價</th><th>出場時間</th><th>出場價</th><th>報酬</th><th>根數</th><th>原因</th></tr></thead><tbody>
       ${r.trades.slice().reverse().map((t, k) => `<tr><td>${r.trades.length - k}</td><td>${t.side === 1 ? '多' : '空'}</td><td>${tstr(bars[t.entryI].utc)}</td><td>${app.fmtS(S.symbol, t.entry)}</td><td>${tstr(bars[t.exitI].utc)}</td><td>${app.fmtS(S.symbol, t.exit)}</td><td class="${app.cls(t.ret)}">${app.pct(t.ret)}</td><td>${t.bars}</td><td>${t.reason}</td></tr>`).join('')}
@@ -214,8 +214,8 @@ export function initBacktest(app) {
     eqChart.applyOptions(app.themeOptions());
     eqChart.applyOptions({ handleScroll: false, handleScale: false });
     const off = app.tzOffset();
-    const line = eqChart.addSeries(LC.AreaSeries, { lineColor: '#f5a524', topColor: 'rgba(245,165,36,.3)', bottomColor: 'rgba(245,165,36,0)', lineWidth: 2, priceLineVisible: false });
-    const bh = eqChart.addSeries(LC.LineSeries, { color: '#64748b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    const line = eqChart.addSeries(LC.AreaSeries, { lineColor: '#00e5ff', topColor: 'rgba(0,229,255,.28)', bottomColor: 'rgba(0,229,255,0)', lineWidth: 2, priceLineVisible: false });
+    const bh = eqChart.addSeries(LC.LineSeries, { color: '#5b7a99', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     const cap = cfg.capital;
     line.setData(r.equity.map((v, i) => ({ time: bars[i].utc + off, value: v })));
     bh.setData(bars.map(b => ({ time: b.utc + off, value: (cap * b.close) / bars[0].open })));

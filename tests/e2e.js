@@ -42,7 +42,7 @@ await p.mouse.move(X(.3),Y(.4));await p.mouse.down();await p.mouse.move(X(.5),Y(
 await p.mouse.click(X(.8),Y(.8)); ok(!(await sel(p)),'deselect by clicking empty');
 await p.mouse.click(X(.4),Y(.35)); ok(await sel(p),'reselect by clicking line');
 // swatch color
-await p.click('.swatch >> nth=2'); ok((await p.evaluate(()=>window.__hawk.drawings.items[0].color))==='#ef4444','swatch color');
+await p.click('.swatch >> nth=2'); ok((await p.evaluate(()=>window.__hawk.drawings.items[0].color))==='#ff3d6e','swatch color');
 ok(await sel(p),'still selected after swatch');
 await p.keyboard.press('Delete'); ok(await items(p)===0,'delete key');
 await p.keyboard.press('Control+z'); ok(await items(p)===1,'undo restores');

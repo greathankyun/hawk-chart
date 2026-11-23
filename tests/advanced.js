@@ -120,6 +120,8 @@ const ev = (p, f, a) => p.evaluate(f, a);
   await p.keyboard.press('Escape');
   // script indicator in subpane
   await ev(p, () => { const a = window.__hawk.app; a.S.scripts.push({ id: 's2', name: 'RSI測試', overlay: false, code: "plot(ta.rsi(close,14),'R','#c084fc'); hline(70); hline(30);" }); a.addScriptIndicator(a.S.scripts[1]); });
+  // pane sizes are only known after the next frame; the legend retries on rAF, so wait for it
+  await p.waitForFunction(() => document.querySelector('#paneLegends').textContent.includes('RSI測試'), null, { timeout: 2000 }).catch(() => {});
   ok((await p.textContent('#paneLegends')).includes('RSI測試'), 'script pane legend');
 
   // --- alerts
