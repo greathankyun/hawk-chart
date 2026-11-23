@@ -96,11 +96,14 @@ function applyTheme() {
 function themeOptions() {
   const dark = S.settings.theme === 'dark';
   return {
-    layout: { background: { color: css('--bg') }, textColor: css('--muted'), panes: { separatorColor: css('--border'), separatorHoverColor: hexA('#f5a524', .3) } },
-    grid: { vertLines: { color: dark ? 'rgba(30,43,66,.55)' : 'rgba(221,227,236,.8)' }, horzLines: { color: dark ? 'rgba(30,43,66,.55)' : 'rgba(221,227,236,.8)' } },
+    layout: { background: { type: LC.ColorType.VerticalGradient, topColor: css('--chart-top'), bottomColor: css('--chart-bottom') }, textColor: css('--muted'), panes: { separatorColor: css('--border'), separatorHoverColor: hexA(css('--accent'), .35) } },
+    grid: { vertLines: { color: css('--grid') }, horzLines: { color: css('--grid') } },
     rightPriceScale: { borderColor: css('--border') },
     timeScale: { borderColor: css('--border') },
-    crosshair: { vertLine: { color: dark ? '#4b5b78' : '#9aa6bb', labelBackgroundColor: dark ? '#26354f' : '#55627a' }, horzLine: { color: dark ? '#4b5b78' : '#9aa6bb', labelBackgroundColor: dark ? '#26354f' : '#55627a' } },
+    crosshair: {
+      vertLine: { color: hexA(css('--accent'), dark ? .55 : .7), width: 1, style: LC.LineStyle.Dashed, labelBackgroundColor: css('--xh-label') },
+      horzLine: { color: hexA(css('--accent'), dark ? .55 : .7), width: 1, style: LC.LineStyle.Dashed, labelBackgroundColor: css('--xh-label') },
+    },
   };
 }
 
@@ -108,7 +111,7 @@ function themeOptions() {
 function baseOptions(getInterval = () => S.interval) {
   return {
     autoSize: true,
-    layout: { fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", sans-serif', fontSize: 11, attributionLogo: false },
+    layout: { fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "PingFang TC", monospace', fontSize: 11, attributionLogo: false },
     crosshair: { mode: LC.CrosshairMode.Normal },
     timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 7, minBarSpacing: 0.5 },
     rightPriceScale: { scaleMargins: { top: 0.12, bottom: 0.08 } },
@@ -133,7 +136,7 @@ function createChart() {
 
 function upDown() {
   const tw = S.settings.colors === 'tw';
-  return { up: tw ? '#ef4444' : '#10b981', down: tw ? '#10b981' : '#ef4444' };
+  return { up: tw ? '#ff3d6e' : '#00e0a4', down: tw ? '#00e0a4' : '#ff3d6e' };
 }
 
 function buildSeries() {
@@ -149,9 +152,9 @@ function buildSeries() {
   if (t === 'candle' || t === 'ha') mainSeries = chart.addSeries(LC.CandlestickSeries, { upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down, priceFormat: pf });
   else if (t === 'hollow') mainSeries = chart.addSeries(LC.CandlestickSeries, { upColor: 'rgba(0,0,0,0)', downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down, priceFormat: pf });
   else if (t === 'bar') mainSeries = chart.addSeries(LC.BarSeries, { upColor: up, downColor: down, thinBars: false, priceFormat: pf });
-  else if (t === 'line') mainSeries = chart.addSeries(LC.LineSeries, { color: '#38bdf8', lineWidth: 2, priceFormat: pf });
+  else if (t === 'line') mainSeries = chart.addSeries(LC.LineSeries, { color: '#00e5ff', lineWidth: 2, priceFormat: pf });
   else if (t === 'baseline') mainSeries = chart.addSeries(LC.BaselineSeries, { baseValue: { type: 'price', price: bars.length ? bars[Math.max(0, bars.length - 160)].close : 0 }, topLineColor: up, bottomLineColor: down, topFillColor1: hexA(up, .28), topFillColor2: hexA(up, .04), bottomFillColor1: hexA(down, .04), bottomFillColor2: hexA(down, .28), lineWidth: 2, priceFormat: pf });
-  else mainSeries = chart.addSeries(LC.AreaSeries, { lineColor: '#38bdf8', topColor: 'rgba(56,189,248,.35)', bottomColor: 'rgba(56,189,248,0)', lineWidth: 2, priceFormat: pf });
+  else mainSeries = chart.addSeries(LC.AreaSeries, { lineColor: '#00e5ff', topColor: 'rgba(0,229,255,.32)', bottomColor: 'rgba(0,229,255,0)', lineWidth: 2, priceFormat: pf });
 
   layer.build(S.indicators, bars);
   const panes = chart.panes();
@@ -342,7 +345,7 @@ function setStatus(st) {
   $('#statusBadge').textContent = map[st] || '';
   if (st === 'delayed') { $('#statusBadge').style.color = css('--muted'); return; }
   $('#statusBadge').style.color = st === 'live' ? css('--down') : css('--muted');
-  if (st === 'live' && S.settings.colors === 'tw') $('#statusBadge').style.color = '#10b981';
+  if (st === 'live' && S.settings.colors === 'tw') $('#statusBadge').style.color = css('--down');
 }
 
 // ---------- header / detail ----------
@@ -665,7 +668,7 @@ function renderIndModal() {
   const cat = $('#indCatalog');
   cat.innerHTML = '';
   const q = indQuery.trim().toLowerCase();
-  const palette = ['#f5a524', '#38bdf8', '#a78bfa', '#f472b6', '#2dd4bf', '#facc15'];
+  const palette = ['#ffc53d', '#00e5ff', '#b388ff', '#ff4fd8', '#00f5b4', '#ffe14d'];
   for (const [g, gname] of Object.entries(I.GROUPS)) {
     const entries = Object.entries(I.CATALOG).filter(([k, d]) => d.g === g && !d.hidden && (!q || (k + d.name).toLowerCase().includes(q)));
     const scripts = g === 'other' ? (S.scripts || []).filter(sc => !q || sc.name.toLowerCase().includes(q)) : [];
@@ -842,7 +845,7 @@ $('#shotBtn').onclick = () => {
   ctx.drawImage($('#overlay'), 0, 0, c.width, c.height);
   // stamp
   const dpr = window.devicePixelRatio || 1;
-  ctx.font = `${12 * dpr}px sans-serif`; ctx.fillStyle = css('--muted');
+  ctx.font = `${12 * dpr}px "JetBrains Mono", ui-monospace, monospace`; ctx.fillStyle = css('--muted');
   ctx.fillText(`${symLabel(S.symbol)} · ${INTERVALS.find(i => i.k === S.interval).label} · 鷹眼看盤 · ${new Date().toLocaleString('zh-TW')}`, 10 * dpr, c.height - 10 * dpr);
   c.toBlob(async b => {
     const name = `${S.symbol.replace(/[^\w.-]+/g, '_')}_${S.interval}_${Date.now()}.png`;
@@ -897,6 +900,8 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // ---------- boot ----------
 document.body.classList.toggle('app-noside', !!S.sideHidden);
 createChart();
+// repaint canvas text once the web fonts (mono numerics) arrive
+document.fonts?.ready.then(() => applyTheme()).catch(() => {});
 layer = new IndicatorLayer({ chart, upDown, priceDec: () => priceDec, getScript: sid => (S.scripts || []).find(x => x.id === sid) });
 drawings = new Drawings({
   chart, getSeries: () => mainSeries, overlay: $('#overlay'), container: $('.chart-wrap'),

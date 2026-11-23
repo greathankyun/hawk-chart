@@ -432,10 +432,10 @@ export const CATALOG = {
 };
 
 export const DEFAULT_INDICATORS = [
-  { id: 'i1', type: 'MA', p: { n: 20 }, color: '#f5a524' },
-  { id: 'i2', type: 'MA', p: { n: 60 }, color: '#38bdf8' },
-  { id: 'i3', type: 'VOL', p: { n: 20 }, color: '#64748b' },
-  { id: 'i4', type: 'MACD', p: { f: 12, s: 26, g: 9 }, color: '#38bdf8' },
+  { id: 'i1', type: 'MA', p: { n: 20 }, color: '#ffc53d' },
+  { id: 'i2', type: 'MA', p: { n: 60 }, color: '#00e5ff' },
+  { id: 'i3', type: 'VOL', p: { n: 20 }, color: '#5b7a99' },
+  { id: 'i4', type: 'MACD', p: { f: 12, s: 26, g: 9 }, color: '#00e5ff' },
 ];
 
 export function label(ind) {

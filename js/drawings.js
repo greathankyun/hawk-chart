@@ -22,9 +22,9 @@ export const TOOLS = [
   { k: 'trash', name: '清除全部畫線', action: true, icon: 'M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7z' },
 ];
 
-export const COLORS = ['#f5a524', '#38bdf8', '#ef4444', '#10b981', '#a78bfa', '#f472b6', '#e2e8f0'];
+export const COLORS = ['#ffc53d', '#00e5ff', '#ff3d6e', '#00e0a4', '#b388ff', '#ff4fd8', '#e6f7ff'];
 const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-const FIB_COLORS = ['#94a3b8', '#ef4444', '#f5a524', '#10b981', '#38bdf8', '#a78bfa', '#94a3b8'];
+const FIB_COLORS = ['#7f9bb8', '#ff3d6e', '#ffc53d', '#00e0a4', '#00e5ff', '#b388ff', '#7f9bb8'];
 const TWO_POINT = new Set(['trend', 'ray', 'extended', 'rect', 'fib', 'measure']);
 
 export class Drawings {
@@ -290,7 +290,7 @@ export class Drawings {
     for (const d of list) this.drawOne(d, w, h, d === this.selected);
     if (this.pending) this.drawOne(this.pending, w, h, true);
     if (this.tool !== 'cursor' && this.hover) {
-      ctx.strokeStyle = 'rgba(148,163,184,.55)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(0,229,255,.45)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(this.hover.x + .5, 0); ctx.lineTo(this.hover.x + .5, h); ctx.moveTo(0, this.hover.y + .5); ctx.lineTo(w, this.hover.y + .5); ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -341,7 +341,7 @@ export class Drawings {
       case 'text': {
         ctx.font = '13px -apple-system, "Segoe UI", "PingFang TC", sans-serif';
         const tw = ctx.measureText(d.text).width;
-        ctx.globalAlpha = .85; ctx.fillStyle = 'rgba(15,23,42,.8)'; roundRect(ctx, a.x - 4, a.y - 18, tw + 12, 22, 5); ctx.fill();
+        ctx.globalAlpha = .85; ctx.fillStyle = 'rgba(4,10,20,.85)'; roundRect(ctx, a.x - 4, a.y - 18, tw + 12, 22, 5); ctx.fill();
         ctx.globalAlpha = 1; ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(d.text, a.x + 2, a.y - 7);
         if (sel) { ctx.strokeStyle = col; roundRect(ctx, a.x - 4, a.y - 18, tw + 12, 22, 5); ctx.stroke(); }
         return;
@@ -349,23 +349,23 @@ export class Drawings {
       case 'measure': {
         const p1 = d.points[0].p, p2 = d.points[1].p;
         const up = p2 >= p1;
-        const c = up ? 'rgba(56,189,248,' : 'rgba(239,68,68,';
+        const c = up ? 'rgba(0,229,255,' : 'rgba(255,61,110,';
         ctx.fillStyle = c + '.15)'; ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
         ctx.strokeStyle = c + '.9)'; ctx.lineWidth = 1;
         line({ x: a.x, y: (a.y + b.y) / 2 }, { x: b.x, y: (a.y + b.y) / 2 });
         line({ x: (a.x + b.x) / 2, y: a.y }, { x: (a.x + b.x) / 2, y: b.y });
         const bars = Math.round(this.idxOf(d.points[1].t) - this.idxOf(d.points[0].t));
         const txt = `${up ? '+' : ''}${this.fmt(p2 - p1)}  (${up ? '+' : ''}${((p2 / p1 - 1) * 100).toFixed(2)}%)  ${bars} 根 · ${durText(Math.abs(d.points[1].t - d.points[0].t))}`;
-        ctx.font = '12px -apple-system, "Segoe UI", "PingFang TC", sans-serif';
+        ctx.font = '12px "JetBrains Mono", ui-monospace, Menlo, "PingFang TC", monospace';
         const tw = ctx.measureText(txt).width;
         const bx = (a.x + b.x) / 2 - tw / 2 - 8, by = (up ? Math.min(a.y, b.y) - 30 : Math.max(a.y, b.y) + 6);
         ctx.fillStyle = c + '.95)'; roundRect(ctx, bx, by, tw + 16, 24, 6); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 8, by + 12);
+        ctx.fillStyle = up ? '#00141a' : '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 8, by + 12);
         return;
       }
     }
     if (sel) for (const p of (d.type === 'hline' || d.type === 'vline') ? [] : pts) {
-      ctx.fillStyle = '#0b1220'; ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#04070d'; ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
     }
   }
@@ -374,7 +374,7 @@ export class Drawings {
     const tw = ctx.measureText(text).width;
     const bx = align === 'right' ? x - tw - 10 : x;
     ctx.fillStyle = col; roundRect(ctx, bx, y - 9, tw + 10, 18, 4); ctx.fill();
-    ctx.fillStyle = '#0b1220'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(text, bx + 5, y);
+    ctx.fillStyle = '#04070d'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(text, bx + 5, y);
   }
 }
 

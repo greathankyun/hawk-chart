@@ -8,8 +8,8 @@
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone"],
   "orientation": "any",
-  "background_color": "#0b1220",
-  "theme_color": "#0b1220",
+  "background_color": "#03060c",
+  "theme_color": "#070e1b",
   "lang": "zh-Hant",
   "categories": ["finance"],
   "icons": [
